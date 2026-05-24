@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Aws.Api.Middleware;
 using Aws.Api.Validators;
+using Aws.Models.Configuration;
 using Aws.Repository;
 using Aws.Services;
 
@@ -11,6 +12,11 @@ var configuration = builder.Configuration;
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// AWS SDK (uses default credential chain: env vars, profile, IAM role)
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<Amazon.S3.IAmazonS3>();
+builder.Services.Configure<S3Options>(configuration.GetSection(S3Options.SectionName));
 
 // Dependency Injection: Repositories (then Services)
 builder.Services.AddRepositories();

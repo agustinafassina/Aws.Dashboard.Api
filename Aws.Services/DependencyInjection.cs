@@ -11,6 +11,7 @@ namespace Aws.Services
         {
             services.AddSingleton<ItemMapper>();
             services.AddTransient<IItemService, ItemService>();
+            services.AddTransient<IS3SecurityService, S3SecurityService>();
             return services;
         }
     }

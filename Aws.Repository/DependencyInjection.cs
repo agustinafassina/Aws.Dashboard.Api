@@ -9,6 +9,7 @@ namespace Aws.Repository
         public static IServiceCollection AddRepositories(this IServiceCollection services)
         {
             services.AddSingleton<IItemRepository, ItemRepository>();
+            services.AddScoped<IS3Repository, S3Repository>();
             return services;
         }
     }

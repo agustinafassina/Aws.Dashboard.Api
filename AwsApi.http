@@ -1,6 +1,7 @@
 @AwsApi_HostAddress = http://localhost:5142
 
-GET {{AwsApi_HostAddress}}/weatherforecast/
+### List public S3 buckets by region
+GET {{AwsApi_HostAddress}}/api/v1/s3/public-buckets?region=us-east-1
 Accept: application/json
 
 ###
