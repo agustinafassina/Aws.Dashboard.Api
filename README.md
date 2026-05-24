@@ -71,13 +71,6 @@ Default region is set in `appsettings.json`:
 
 Override via environment variable: `AWS__Region=us-east-1`
 
-## API — S3 public buckets 🛡️
-Lists S3 buckets in a given region that are publicly accessible. For each bucket it checks:
-
-- **Block Public Access** settings
-- **Bucket policy** (`GetBucketPolicyStatus`)
-- **Bucket ACL** grants to `AllUsers` or `AuthenticatedUsers`
-
 ## Contributing 🤝
 1. Fork the repository
 2. Create a branch (`feature/your-feature`)
