@@ -16,7 +16,11 @@ builder.Services.AddSwaggerGen();
 // AWS SDK (uses default credential chain: env vars, profile, IAM role)
 builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
 builder.Services.AddAWSService<Amazon.S3.IAmazonS3>();
+builder.Services.AddAWSService<Amazon.EC2.IAmazonEC2>();
+builder.Services.AddAWSService<Amazon.RDS.IAmazonRDS>();
 builder.Services.Configure<S3Options>(configuration.GetSection(S3Options.SectionName));
+builder.Services.Configure<Ec2Options>(configuration.GetSection(Ec2Options.SectionName));
+builder.Services.Configure<RdsOptions>(configuration.GetSection(RdsOptions.SectionName));
 
 // Dependency Injection: Repositories (then Services)
 builder.Services.AddRepositories();

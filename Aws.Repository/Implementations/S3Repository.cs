@@ -162,7 +162,7 @@ public class S3Repository : IS3Repository
                 new GetBucketAclRequest { BucketName = bucketName },
                 cancellationToken);
 
-            return (response.Grants ?? Array.Empty<S3Grant>()).Any(IsPublicGrant);
+            return response.Grants?.Any(IsPublicGrant) == true;
         }
         catch (AmazonS3Exception ex) when (ex.StatusCode is HttpStatusCode.NotFound)
         {
