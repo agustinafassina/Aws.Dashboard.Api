@@ -1,25 +1,26 @@
 # Aws.Api (.NET 10) ☁️
 Security-focused Web API for AWS. It connects to your AWS account and surfaces resources that may not follow cloud security best practices.
 
-**Status:** early stage — S3 public bucket scanning is available today. More checks are planned.
+**Status:** early stage — S3, EC2 and RDS checks are available. More checks are planned.
 
 ## Vision 🎯
-This API is meant to help teams audit and improve their AWS posture by exposing actionable findings: misconfigurations, risky permissions, stale credentials, and other gaps against well-known best practices.
+Help teams audit and improve their AWS posture by exposing misconfigurations, risky permissions, stale credentials, and other gaps against well-known best practices.
 
 ### Roadmap 🗺️
 | Area | Planned checks |
 |------|----------------|
 | **S3** | Public buckets *(available)* |
+| **EC2** | Instances, security groups and open inbound ports *(available)* |
+| **RDS** | Database instances, security groups and open inbound ports *(available)* |
 | **IAM** | Users without MFA, access keys that need rotation |
 | **IAM** | Roles and permissions aligned with least privilege |
-| **EC2** | Instances and exposure / vulnerability signals |
 | **Containers** | Docker images and related vulnerability insights |
 | **Cost** | Cost visibility and optimization hints |
 | **More** | Additional security and governance checks over time |
 
 ## Requirements ✅
 - .NET 10 SDK
-- AWS credentials with permissions to read the resources being scanned
+- AWS credentials with read permissions for the resources being scanned
 - (Optional) Docker
 
 ## Solution structure 📦
@@ -36,9 +37,8 @@ dotnet build
 dotnet run --project Aws.Api
 ```
 
-In Development, Swagger is available at `http://localhost:5142/swagger`.
-
-Health check: `GET /health`
+- Swagger: `http://localhost:5142/swagger`
+- Health check: `GET /health`
 
 ## Docker 🐳
 ```bash
@@ -55,21 +55,27 @@ Swagger: `http://localhost:8787/swagger`
 
 ## Configuration ⚙️
 ### AWS credentials 🔑
-The API uses the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-net/v3/developer-guide/creds-locate.html):
+Uses the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-net/v3/developer-guide/creds-locate.html): env vars, `~/.aws/credentials`, or IAM role.
 
-- Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`
-- Shared credentials file (`~/.aws/credentials`)
-- IAM role (when running on AWS compute)
+Default region in `appsettings.json` — override with `AWS__Region=us-east-1`.
 
-Default region is set in `appsettings.json`:
+### Service options
+| Section | Purpose | Env var prefix |
+|---------|---------|----------------|
+| `S3` | Public ACL grantee URIs | `S3__` |
+| `Ec2` | CIDRs treated as public exposure (`0.0.0.0/0`, `::/0`) | `Ec2__PublicInboundCidrs__` |
+| `Rds` | CIDRs treated as public exposure | `Rds__PublicInboundCidrs__` |
 
-```json
-"AWS": {
-  "Region": "us-east-1"
-}
-```
+See `appsettings.json` for default values.
 
-Override via environment variable: `AWS__Region=us-east-1`
+## API endpoints 🛡️
+All endpoints require `?region=` (e.g. `us-east-1`). Full request/response schemas are in **Swagger**.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/s3/public-buckets` | S3 buckets publicly accessible (policy, ACL, Block Public Access) |
+| `GET` | `/api/v1/ec2/open-ports` | EC2 instances, security groups and inbound ports open to the internet |
+| `GET` | `/api/v1/rds/open-ports` | RDS instances, security groups, `PubliclyAccessible` flag and open ports |
 
 ## Contributing 🤝
 1. Fork the repository
