@@ -8,7 +8,7 @@ public static class SecurityGroupRuleMapper
     public static SecurityGroupDto MapSecurityGroup(
         string groupId,
         string? groupName,
-        SecurityGroup? securityGroup,
+        Amazon.EC2.Model.SecurityGroup? securityGroup,
         IReadOnlySet<string> publicInboundCidrs)
     {
         if (securityGroup == null)
@@ -32,17 +32,20 @@ public static class SecurityGroupRuleMapper
     }
 
     public static List<InboundRuleDto> MapInboundRules(
-        IEnumerable<IpPermission> permissions,
+        IEnumerable<IpPermission>? permissions,
         IReadOnlySet<string> publicInboundCidrs)
     {
         var rules = new List<InboundRuleDto>();
+
+        if (permissions == null)
+            return rules;
 
         foreach (var permission in permissions)
         {
             string? protocol = permission.IpProtocol ?? "unknown";
             string? portRange = FormatPortRange(protocol, permission.FromPort, permission.ToPort);
 
-            foreach (var range in permission.Ipv4Ranges)
+            foreach (var range in permission.Ipv4Ranges ?? [])
             {
                 rules.Add(CreateRule(
                     protocol,
@@ -55,7 +58,7 @@ public static class SecurityGroupRuleMapper
                     publicInboundCidrs));
             }
 
-            foreach (var range in permission.Ipv6Ranges)
+            foreach (var range in permission.Ipv6Ranges ?? [])
             {
                 rules.Add(CreateRule(
                     protocol,
@@ -68,9 +71,9 @@ public static class SecurityGroupRuleMapper
                     publicInboundCidrs));
             }
 
-            foreach (var pair in permission.UserIdGroupPairs)
+            foreach (var pair in permission.UserIdGroupPairs ?? [])
             {
-                string? source = !string.IsNullOrWhiteSpace(pair.GroupId)
+                var source = !string.IsNullOrWhiteSpace(pair.GroupId)
                     ? pair.GroupId
                     : pair.GroupName ?? "unknown";
 
@@ -85,7 +88,7 @@ public static class SecurityGroupRuleMapper
                     publicInboundCidrs));
             }
 
-            foreach (var prefixList in permission.PrefixListIds)
+            foreach (var prefixList in permission.PrefixListIds ?? [])
             {
                 rules.Add(CreateRule(
                     protocol,
@@ -151,7 +154,7 @@ public static class SecurityGroupRuleMapper
         IReadOnlySet<string> publicInboundCidrs)
     {
         string? normalizedSource = source ?? "unknown";
-        bool isPublic = sourceType == "Cidr" && publicInboundCidrs.Contains(normalizedSource);
+        bo|ol isPublic = sourceType == "Cidr" && publicInboundCidrs.Contains(normalizedSource);
 
         return new InboundRuleDto
         {

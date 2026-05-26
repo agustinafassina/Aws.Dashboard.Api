@@ -17,3 +17,9 @@ GET {{AwsApi_HostAddress}}/api/v1/rds/open-ports?region=us-east-1
 Accept: application/json
 
 ###
+
+### List IAM access keys
+GET {{AwsApi_HostAddress}}/api/v1/iam/access-keys
+Accept: application/json
+
+###

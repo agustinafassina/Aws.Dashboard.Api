@@ -125,6 +125,7 @@ public class Ec2Repository : IEc2Repository
         IReadOnlyDictionary<string, SecurityGroup> securityGroups)
     {
         List<SecurityGroupDto> mappedGroups = instance.SecurityGroups
+            .Where(group => !string.IsNullOrWhiteSpace(group.GroupId))
             .Select(group =>
             {
                 securityGroups.TryGetValue(group.GroupId, out var securityGroup);

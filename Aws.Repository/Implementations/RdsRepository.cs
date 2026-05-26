@@ -99,6 +99,7 @@ public class RdsRepository : IRdsRepository
         IReadOnlyDictionary<string, Amazon.EC2.Model.SecurityGroup> securityGroups)
     {
         List<SecurityGroupDto> mappedGroups = instance.VpcSecurityGroups
+            .Where(group => !string.IsNullOrWhiteSpace(group.VpcSecurityGroupId))
             .Select(group =>
             {
                 securityGroups.TryGetValue(group.VpcSecurityGroupId, out var securityGroup);
@@ -120,7 +121,7 @@ public class RdsRepository : IRdsRepository
 
         return new RdsInstancePortsDto
         {
-            DbInstanceIdentifier = instance.DBInstanceIdentifier,
+            DbInstanceIdentifier = instance.DBInstanceIdentifier ?? "unknown",
             Engine = instance.Engine ?? "unknown",
             EngineVersion = instance.EngineVersion,
             Status = instance.DBInstanceStatus ?? "unknown",

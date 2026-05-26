@@ -1,7 +1,7 @@
 # Aws.Api (.NET 10) ☁️
 Security-focused Web API for AWS. It connects to your AWS account and surfaces resources that may not follow cloud security best practices.
 
-**Status:** early stage — S3, EC2 and RDS checks are available. More checks are planned.
+**Status:** early stage — S3, EC2, RDS and IAM access key checks are available. More checks are planned.
 
 ## Vision 🎯
 Help teams audit and improve their AWS posture by exposing misconfigurations, risky permissions, stale credentials, and other gaps against well-known best practices.
@@ -12,8 +12,8 @@ Help teams audit and improve their AWS posture by exposing misconfigurations, ri
 | **S3** | Public buckets *(available)* |
 | **EC2** | Instances, security groups and open inbound ports *(available)* |
 | **RDS** | Database instances, security groups and open inbound ports *(available)* |
-| **IAM** | Users without MFA, access keys that need rotation |
-| **IAM** | Roles and permissions aligned with least privilege |
+| **IAM** | Access keys listing and rotation checks *(available)* |
+| **IAM** | Users without MFA, roles and permissions aligned with least privilege |
 | **Containers** | Docker images and related vulnerability insights |
 | **Cost** | Cost visibility and optimization hints |
 | **More** | Additional security and governance checks over time |
@@ -65,17 +65,19 @@ Default region in `appsettings.json` — override with `AWS__Region=us-east-1`.
 | `S3` | Public ACL grantee URIs | `S3__` |
 | `Ec2` | CIDRs treated as public exposure (`0.0.0.0/0`, `::/0`) | `Ec2__PublicInboundCidrs__` |
 | `Rds` | CIDRs treated as public exposure | `Rds__PublicInboundCidrs__` |
+| `Iam` | Max age (days) before access keys need rotation | `Iam__AccessKeyRotationMaxAgeDays` |
 
 See `appsettings.json` for default values.
 
 ## API endpoints 🛡️
-All endpoints require `?region=` (e.g. `us-east-1`). Full request/response schemas are in **Swagger**.
+Regional endpoints require `?region=` (e.g. `us-east-1`). IAM is global. Full schemas are in **Swagger**.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/s3/public-buckets` | S3 buckets publicly accessible (policy, ACL, Block Public Access) |
 | `GET` | `/api/v1/ec2/open-ports` | EC2 instances, security groups and inbound ports open to the internet |
 | `GET` | `/api/v1/rds/open-ports` | RDS instances, security groups, `PubliclyAccessible` flag and open ports |
+| `GET` | `/api/v1/iam/access-keys` | IAM access keys for all users, age, last usage and rotation status |
 
 ## Contributing 🤝
 1. Fork the repository

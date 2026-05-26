@@ -18,9 +18,11 @@ builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
 builder.Services.AddAWSService<Amazon.S3.IAmazonS3>();
 builder.Services.AddAWSService<Amazon.EC2.IAmazonEC2>();
 builder.Services.AddAWSService<Amazon.RDS.IAmazonRDS>();
+builder.Services.AddAWSService<Amazon.IdentityManagement.IAmazonIdentityManagementService>();
 builder.Services.Configure<S3Options>(configuration.GetSection(S3Options.SectionName));
 builder.Services.Configure<Ec2Options>(configuration.GetSection(Ec2Options.SectionName));
 builder.Services.Configure<RdsOptions>(configuration.GetSection(RdsOptions.SectionName));
+builder.Services.Configure<IamOptions>(configuration.GetSection(IamOptions.SectionName));
 
 // Dependency Injection: Repositories (then Services)
 builder.Services.AddRepositories();
