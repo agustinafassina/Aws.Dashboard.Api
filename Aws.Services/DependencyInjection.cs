@@ -15,6 +15,7 @@ namespace Aws.Services
             services.AddTransient<IEc2SecurityService, Ec2SecurityService>();
             services.AddTransient<IRdsSecurityService, RdsSecurityService>();
             services.AddTransient<IIamSecurityService, IamSecurityService>();
+            services.AddTransient<ICostService, CostService>();
             return services;
         }
     }

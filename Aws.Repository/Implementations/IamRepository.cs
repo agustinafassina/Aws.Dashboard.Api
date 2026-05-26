@@ -68,7 +68,7 @@ public class IamRepository : IIamRepository
                 new ListUsersRequest { Marker = marker },
                 cancellationToken);
 
-            users.AddRange(response.Users);
+            users.AddRange(response.Users ?? []);
             marker = response.IsTruncated == true ? response.Marker : null;
         }
         while (!string.IsNullOrEmpty(marker));
@@ -89,8 +89,11 @@ public class IamRepository : IIamRepository
                 new ListAccessKeysRequest { UserName = userName, Marker = marker },
                 cancellationToken);
 
-            foreach (var metadata in response.AccessKeyMetadata)
+            foreach (var metadata in response.AccessKeyMetadata ?? [])
             {
+                if (metadata is null)
+                    continue;
+
                 keys.Add(await MapAccessKeyAsync(userName, metadata, cancellationToken));
             }
 

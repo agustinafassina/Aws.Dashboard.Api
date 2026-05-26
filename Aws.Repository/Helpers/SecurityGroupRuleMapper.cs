@@ -154,7 +154,7 @@ public static class SecurityGroupRuleMapper
         IReadOnlySet<string> publicInboundCidrs)
     {
         string? normalizedSource = source ?? "unknown";
-        bo|ol isPublic = sourceType == "Cidr" && publicInboundCidrs.Contains(normalizedSource);
+        bool isPublic = sourceType == "Cidr" && publicInboundCidrs.Contains(normalizedSource);
 
         return new InboundRuleDto
         {

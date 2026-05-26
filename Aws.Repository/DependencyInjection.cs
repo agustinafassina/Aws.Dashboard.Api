@@ -13,6 +13,7 @@ namespace Aws.Repository
             services.AddScoped<IEc2Repository, Ec2Repository>();
             services.AddScoped<IRdsRepository, RdsRepository>();
             services.AddScoped<IIamRepository, IamRepository>();
+            services.AddScoped<ICostRepository, CostRepository>();
             return services;
         }
     }
