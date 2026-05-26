@@ -1,7 +1,7 @@
 # Aws.Api (.NET 10) ☁️
 Security-focused Web API for AWS. It connects to your AWS account and surfaces resources that may not follow cloud security best practices.
 
-**Status:** early stage — S3, EC2, RDS and IAM access key checks are available. More checks are planned.
+**Status:** early stage — S3, EC2, RDS, IAM access key checks and cost-by-project are available. More checks are planned.
 
 ## Vision 🎯
 Help teams audit and improve their AWS posture by exposing misconfigurations, risky permissions, stale credentials, and other gaps against well-known best practices.
@@ -15,7 +15,7 @@ Help teams audit and improve their AWS posture by exposing misconfigurations, ri
 | **IAM** | Access keys listing and rotation checks *(available)* |
 | **IAM** | Users without MFA, roles and permissions aligned with least privilege |
 | **Containers** | Docker images and related vulnerability insights |
-| **Cost** | Cost visibility and optimization hints |
+| **Cost** | Costs grouped by project tag with date range *(available)* |
 | **More** | Additional security and governance checks over time |
 
 ## Requirements ✅
@@ -66,11 +66,12 @@ Default region in `appsettings.json` — override with `AWS__Region=us-east-1`.
 | `Ec2` | CIDRs treated as public exposure (`0.0.0.0/0`, `::/0`) | `Ec2__PublicInboundCidrs__` |
 | `Rds` | CIDRs treated as public exposure | `Rds__PublicInboundCidrs__` |
 | `Iam` | Max age (days) before access keys need rotation | `Iam__AccessKeyRotationMaxAgeDays` |
+| `Cost` | Tag key used to group costs by project, and cost metric | `Cost__ProjectTagKey`, `Cost__Metric` |
 
 See `appsettings.json` for default values.
 
 ## API endpoints 🛡️
-Regional endpoints require `?region=` (e.g. `us-east-1`). IAM is global. Full schemas are in **Swagger**.
+Regional endpoints require `?region=` (e.g. `us-east-1`). IAM and Cost Explorer are global. Full schemas are in **Swagger**.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -78,6 +79,7 @@ Regional endpoints require `?region=` (e.g. `us-east-1`). IAM is global. Full sc
 | `GET` | `/api/v1/ec2/open-ports` | EC2 instances, security groups and inbound ports open to the internet |
 | `GET` | `/api/v1/rds/open-ports` | RDS instances, security groups, `PubliclyAccessible` flag and open ports |
 | `GET` | `/api/v1/iam/access-keys` | IAM access keys for all users, age, last usage and rotation status |
+| `GET` | `/api/v1/cost/by-project?startDate=&endDate=` | AWS costs grouped by project tag for an inclusive date range (`yyyy-MM-dd`) |
 
 ## Contributing 🤝
 1. Fork the repository

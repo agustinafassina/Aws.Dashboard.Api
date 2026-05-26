@@ -23,3 +23,9 @@ GET {{AwsApi_HostAddress}}/api/v1/iam/access-keys
 Accept: application/json
 
 ###
+
+### Costs grouped by project tag (inclusive date range)
+GET {{AwsApi_HostAddress}}/api/v1/cost/by-project?startDate=2026-05-01&endDate=2026-05-31
+Accept: application/json
+
+###
