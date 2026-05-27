@@ -29,3 +29,9 @@ GET {{AwsApi_HostAddress}}/api/v1/cost/by-project?startDate=2026-05-01&endDate=2
 Accept: application/json
 
 ###
+
+### Inspector vulnerabilities by region (optional filters: resourceType, severity, status)
+GET {{AwsApi_HostAddress}}/api/v1/inspector/vulnerabilities?region=us-east-1&resourceType=ec2&severity=HIGH&status=ACTIVE
+Accept: application/json
+
+###

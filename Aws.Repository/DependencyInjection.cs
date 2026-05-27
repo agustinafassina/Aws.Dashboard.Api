@@ -14,6 +14,7 @@ namespace Aws.Repository
             services.AddScoped<IRdsRepository, RdsRepository>();
             services.AddScoped<IIamRepository, IamRepository>();
             services.AddScoped<ICostRepository, CostRepository>();
+            services.AddScoped<IInspectorRepository, InspectorRepository>();
             return services;
         }
     }

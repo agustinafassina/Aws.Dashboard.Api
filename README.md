@@ -1,7 +1,7 @@
 # Aws.Api (.NET 10) ☁️
 Security-focused Web API for AWS. It connects to your AWS account and surfaces resources that may not follow cloud security best practices.
 
-**Status:** early stage — S3, EC2, RDS, IAM access key checks and cost-by-project are available. More checks are planned.
+**Status:** early stage — S3, EC2, RDS, IAM access keys, cost-by-project and Inspector vulnerabilities are available. More checks are planned.
 
 ## Vision 🎯
 Help teams audit and improve their AWS posture by exposing misconfigurations, risky permissions, stale credentials, and other gaps against well-known best practices.
@@ -14,7 +14,7 @@ Help teams audit and improve their AWS posture by exposing misconfigurations, ri
 | **RDS** | Database instances, security groups and open inbound ports *(available)* |
 | **IAM** | Access keys listing and rotation checks *(available)* |
 | **IAM** | Users without MFA, roles and permissions aligned with least privilege |
-| **Containers** | Docker images and related vulnerability insights |
+| **Containers** | Amazon Inspector vulnerabilities for EC2, Lambda and ECR *(available)* |
 | **Cost** | Costs grouped by project tag with date range *(available)* |
 | **More** | Additional security and governance checks over time |
 
@@ -67,6 +67,7 @@ Default region in `appsettings.json` — override with `AWS__Region=us-east-1`.
 | `Rds` | CIDRs treated as public exposure | `Rds__PublicInboundCidrs__` |
 | `Iam` | Max age (days) before access keys need rotation | `Iam__AccessKeyRotationMaxAgeDays` |
 | `Cost` | Tag key used to group costs by project, and cost metric | `Cost__ProjectTagKey`, `Cost__Metric` |
+| `Inspector` | Page size and max findings cap for vulnerability scans | `Inspector__PageSize`, `Inspector__MaxTotalFindings` |
 
 See `appsettings.json` for default values.
 
@@ -80,6 +81,7 @@ Regional endpoints require `?region=` (e.g. `us-east-1`). IAM and Cost Explorer 
 | `GET` | `/api/v1/rds/open-ports` | RDS instances, security groups, `PubliclyAccessible` flag and open ports |
 | `GET` | `/api/v1/iam/access-keys` | IAM access keys for all users, age, last usage and rotation status |
 | `GET` | `/api/v1/cost/by-project?startDate=&endDate=` | AWS costs grouped by project tag for an inclusive date range (`yyyy-MM-dd`) |
+| `GET` | `/api/v1/inspector/vulnerabilities?region=&resourceType=&severity=&status=` | Amazon Inspector findings for EC2, Lambda or ECR (`resourceType`: `ec2`, `lambda`, `ecr`) |
 
 ## Contributing 🤝
 1. Fork the repository
