@@ -35,27 +35,33 @@ builder.Services.AddApplicationServices();
 // Request validators (FluentValidation)
 builder.Services.AddValidatorsFromAssemblyContaining<ItemCreateDtoValidator>();
 
-// CORS
-var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? (builder.Environment.IsDevelopment() ? new[] { "*" } : Array.Empty<string>());
+// CORS — explicit origins only (* is ignored; incompatible with credentialed browser requests)
+var configuredOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var allowedOrigins = configuredOrigins
+    .Where(o => !string.IsNullOrWhiteSpace(o) && !string.Equals(o, "*", StringComparison.Ordinal))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToList();
+
+if (builder.Environment.IsDevelopment())
+{
+    foreach (var devOrigin in new[] { "http://localhost:3000", "http://127.0.0.1:3000" })
+    {
+        if (!allowedOrigins.Contains(devOrigin, StringComparer.OrdinalIgnoreCase))
+            allowedOrigins.Add(devOrigin);
+    }
+}
+
+if (allowedOrigins.Count == 0)
+    allowedOrigins.Add("http://localhost:3000");
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowSpecificOrigins", policy =>
     {
-        if (builder.Environment.IsDevelopment() && allowedOrigins.Contains("*"))
-        {
-            policy.AllowAnyOrigin()
-                  .AllowAnyMethod()
-                  .AllowAnyHeader();
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyMethod()
-                  .AllowAnyHeader()
-                  .AllowCredentials();
-        }
+        policy.WithOrigins(allowedOrigins.ToArray())
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 });
 
@@ -102,10 +108,12 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+    app.UseHttpsRedirection();
+
 app.UseRouting();
 app.UseCors("AllowSpecificOrigins");
+app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 

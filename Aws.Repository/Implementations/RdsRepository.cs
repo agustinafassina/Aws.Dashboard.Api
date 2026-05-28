@@ -42,7 +42,7 @@ public class RdsRepository : IRdsRepository
 
         List<DBInstance> instances = await ListDbInstancesAsync(rdsClient, cancellationToken);
         List<string> groupIds = instances
-            .SelectMany(i => i.VpcSecurityGroups)
+            .SelectMany(i => i.VpcSecurityGroups ?? [])
             .Select(g => g.VpcSecurityGroupId)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.Ordinal)
@@ -86,7 +86,7 @@ public class RdsRepository : IRdsRepository
                 new DescribeDBInstancesRequest { Marker = marker },
                 cancellationToken);
 
-            instances.AddRange(response.DBInstances);
+            instances.AddRange(response.DBInstances ?? []);
             marker = response.Marker;
         }
         while (!string.IsNullOrEmpty(marker));
@@ -98,7 +98,7 @@ public class RdsRepository : IRdsRepository
         DBInstance instance,
         IReadOnlyDictionary<string, Amazon.EC2.Model.SecurityGroup> securityGroups)
     {
-        List<SecurityGroupDto> mappedGroups = instance.VpcSecurityGroups
+        List<SecurityGroupDto> mappedGroups = (instance.VpcSecurityGroups ?? [])
             .Where(group => !string.IsNullOrWhiteSpace(group.VpcSecurityGroupId))
             .Select(group =>
             {
