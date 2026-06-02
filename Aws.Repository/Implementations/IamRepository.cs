@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Aws.Models.Configuration;
 using Aws.Models.Dto;
+using Aws.Repository.Helpers;
 using Aws.Repository.Interfaces;
 
 namespace Aws.Repository.Implementations;
@@ -48,6 +49,7 @@ public class IamRepository : IIamRepository
             TotalUsers = users.Count,
             TotalAccessKeys = accessKeys.Count,
             AccessKeysNeedingRotation = accessKeys.Count(k => k.NeedsRotation),
+            AccessKeysNeverUsed = accessKeys.Count(k => k.IsNeverUsed),
             AccessKeyRotationMaxAgeDays = _rotationMaxAgeDays,
             AccessKeys = accessKeys
                 .OrderBy(k => k.UserName, StringComparer.Ordinal)
@@ -140,6 +142,8 @@ public class IamRepository : IIamRepository
             }
         }
 
+        bool isNeverUsed = status == StatusType.Active && lastUsedDate is null;
+
         return new IamAccessKeyDto
         {
             UserName = userName,
@@ -151,15 +155,201 @@ public class IamRepository : IIamRepository
             LastUsedService = lastUsedService,
             LastUsedRegion = lastUsedRegion,
             NeedsRotation = needsRotation,
-            Recommendation = BuildRecommendation(status, needsRotation, ageInDays, lastUsedDate)
+            IsNeverUsed = isNeverUsed,
+            Recommendation = BuildRecommendation(status, needsRotation, ageInDays, lastUsedDate, isNeverUsed)
         };
+    }
+
+    public async Task<IamUsersWithoutMfaResponseDto> GetUsersWithoutMfaAsync(
+        CancellationToken cancellationToken = default)
+    {
+        List<User> users = await ListUsersAsync(cancellationToken);
+        List<IamUserWithoutMfaDto> usersWithoutMfa = new();
+        int usersWithConsoleAccess = 0;
+
+        foreach (User user in users)
+        {
+            if (string.IsNullOrWhiteSpace(user.UserName))
+                continue;
+
+            if (!await UserHasConsoleAccessAsync(user.UserName, cancellationToken))
+                continue;
+
+            usersWithConsoleAccess++;
+
+            if (await UserHasMfaDeviceAsync(user.UserName, cancellationToken))
+                continue;
+
+            usersWithoutMfa.Add(new IamUserWithoutMfaDto
+            {
+                UserName = user.UserName,
+                Email = await ResolveUserEmailAsync(user.UserName, cancellationToken),
+                UserCreated = user.CreateDate,
+                Recommendation =
+                    "Console user has no MFA device. Enable MFA for all users with password sign-in.",
+            });
+        }
+
+        return new IamUsersWithoutMfaResponseDto
+        {
+            TotalUsers = users.Count,
+            UsersWithConsoleAccess = usersWithConsoleAccess,
+            UsersWithoutMfa = usersWithoutMfa.Count,
+            Users = usersWithoutMfa
+                .OrderBy(u => u.UserName, StringComparer.Ordinal)
+                .ToList(),
+            ScannedAt = DateTime.UtcNow,
+        };
+    }
+
+    public async Task<IamRiskyPoliciesResponseDto> GetRiskyPoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        List<ManagedPolicy> policies = await ListCustomerManagedPoliciesAsync(cancellationToken);
+        List<IamRiskyPolicyDto> riskyPolicies = new();
+
+        foreach (ManagedPolicy policy in policies)
+        {
+            if (string.IsNullOrWhiteSpace(policy.Arn) || string.IsNullOrWhiteSpace(policy.PolicyName))
+                continue;
+
+            string? riskReason = await TryGetPolicyWildcardRiskAsync(policy.Arn, cancellationToken);
+            if (riskReason is null)
+                continue;
+
+            riskyPolicies.Add(new IamRiskyPolicyDto
+            {
+                PolicyArn = policy.Arn,
+                PolicyName = policy.PolicyName,
+                RiskReason = riskReason,
+                Recommendation =
+                    "Policy grants broad *:* permissions. Replace with least-privilege actions and resources.",
+            });
+        }
+
+        return new IamRiskyPoliciesResponseDto
+        {
+            TotalCustomerPoliciesScanned = policies.Count,
+            RiskyPolicyCount = riskyPolicies.Count,
+            Policies = riskyPolicies
+                .OrderBy(p => p.PolicyName, StringComparer.Ordinal)
+                .ToList(),
+            ScannedAt = DateTime.UtcNow,
+        };
+    }
+
+    private async Task<string?> ResolveUserEmailAsync(
+        string userName,
+        CancellationToken cancellationToken)
+    {
+        if (userName.Contains('@', StringComparison.Ordinal))
+            return userName;
+
+        try
+        {
+            ListUserTagsResponse tagsResponse = await _iamClient.ListUserTagsAsync(
+                new ListUserTagsRequest { UserName = userName },
+                cancellationToken);
+
+            string? fromTag = tagsResponse.Tags?
+                .FirstOrDefault(tag =>
+                    string.Equals(tag.Key, "email", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(tag.Key, "mail", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+
+            return string.IsNullOrWhiteSpace(fromTag) ? null : fromTag.Trim();
+        }
+        catch (AmazonIdentityManagementServiceException ex)
+        {
+            _logger.LogWarning(ex, "Could not list tags for IAM user {UserName}", userName);
+            return null;
+        }
+    }
+
+    private async Task<bool> UserHasConsoleAccessAsync(string userName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _iamClient.GetLoginProfileAsync(
+                new GetLoginProfileRequest { UserName = userName },
+                cancellationToken);
+            return true;
+        }
+        catch (NoSuchEntityException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> UserHasMfaDeviceAsync(string userName, CancellationToken cancellationToken)
+    {
+        ListMFADevicesResponse response = await _iamClient.ListMFADevicesAsync(
+            new ListMFADevicesRequest { UserName = userName },
+            cancellationToken);
+
+        return (response.MFADevices?.Count ?? 0) > 0;
+    }
+
+    private async Task<List<ManagedPolicy>> ListCustomerManagedPoliciesAsync(
+        CancellationToken cancellationToken)
+    {
+        List<ManagedPolicy> policies = new();
+        string? marker = null;
+
+        do
+        {
+            ListPoliciesResponse response = await _iamClient.ListPoliciesAsync(
+                new ListPoliciesRequest { Scope = PolicyScopeType.Local, Marker = marker },
+                cancellationToken);
+
+            policies.AddRange(response.Policies ?? []);
+            marker = response.IsTruncated == true ? response.Marker : null;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return policies;
+    }
+
+    private async Task<string?> TryGetPolicyWildcardRiskAsync(
+        string policyArn,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            GetPolicyResponse policy = await _iamClient.GetPolicyAsync(
+                new GetPolicyRequest { PolicyArn = policyArn },
+                cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(policy.Policy?.DefaultVersionId))
+                return null;
+
+            GetPolicyVersionResponse version = await _iamClient.GetPolicyVersionAsync(
+                new GetPolicyVersionRequest
+                {
+                    PolicyArn = policyArn,
+                    VersionId = policy.Policy.DefaultVersionId,
+                },
+                cancellationToken);
+
+            string document = IamPolicyRiskAnalyzer.DecodePolicyDocument(version.PolicyVersion?.Document);
+
+            return IamPolicyRiskAnalyzer.TryGetWildcardAdminRisk(document, out string riskReason)
+                ? riskReason
+                : null;
+        }
+        catch (AmazonIdentityManagementServiceException ex)
+        {
+            _logger.LogWarning(ex, "Could not evaluate policy {PolicyArn}", policyArn);
+            return null;
+        }
     }
 
     private string BuildRecommendation(
         string status,
         bool needsRotation,
         int ageInDays,
-        DateTime? lastUsedDate)
+        DateTime? lastUsedDate,
+        bool isNeverUsed)
     {
         if (status == StatusType.Inactive)
             return "Access key is inactive. Remove unused keys to reduce credential sprawl.";
@@ -167,7 +357,7 @@ public class IamRepository : IIamRepository
         if (needsRotation)
             return $"Access key is {ageInDays} days old. Rotate active keys at least every {_rotationMaxAgeDays} days.";
 
-        if (lastUsedDate == null)
+        if (isNeverUsed)
             return "Active access key has no recorded usage. Verify if it is still required or deactivate it.";
 
         return "Access key is within the recommended rotation window.";

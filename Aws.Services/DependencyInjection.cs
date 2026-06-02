@@ -17,6 +17,7 @@ namespace Aws.Services
             services.AddTransient<IIamSecurityService, IamSecurityService>();
             services.AddTransient<ICostService, CostService>();
             services.AddTransient<IInspectorSecurityService, InspectorSecurityService>();
+            services.AddTransient<IAuditService, AuditService>();
             return services;
         }
     }

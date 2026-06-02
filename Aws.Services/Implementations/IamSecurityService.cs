@@ -28,4 +28,34 @@ public class IamSecurityService : IIamSecurityService
 
         return result;
     }
+
+    public async Task<IamUsersWithoutMfaResponseDto> GetUsersWithoutMfaAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM users without MFA");
+        IamUsersWithoutMfaResponseDto result =
+            await _iamRepository.GetUsersWithoutMfaAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "MFA scan complete: {WithoutMfa}/{ConsoleUsers} console users without MFA",
+            result.UsersWithoutMfa,
+            result.UsersWithConsoleAccess);
+
+        return result;
+    }
+
+    public async Task<IamRiskyPoliciesResponseDto> GetRiskyPoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM customer policies for wildcard admin");
+        IamRiskyPoliciesResponseDto result =
+            await _iamRepository.GetRiskyPoliciesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Policy scan complete: {Risky}/{Total} customer policies with *:* allow",
+            result.RiskyPolicyCount,
+            result.TotalCustomerPoliciesScanned);
+
+        return result;
+    }
 }

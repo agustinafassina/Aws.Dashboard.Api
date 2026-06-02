@@ -11,5 +11,6 @@ public class IamAccessKeyDto
     public string? LastUsedService { get; init; }
     public string? LastUsedRegion { get; init; }
     public bool NeedsRotation { get; init; }
+    public bool IsNeverUsed { get; init; }
     public required string Recommendation { get; init; }
 }

@@ -25,4 +25,26 @@ public class IamSecurityController : ControllerBase
         Models.Dto.IamAccessKeysResponseDto? result = await _iamSecurityService.GetAccessKeysAsync(cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("users-without-mfa")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUsersWithoutMfa(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetUsersWithoutMfa called");
+
+        Models.Dto.IamUsersWithoutMfaResponseDto result =
+            await _iamSecurityService.GetUsersWithoutMfaAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("risky-policies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRiskyPolicies(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetRiskyPolicies called");
+
+        Models.Dto.IamRiskyPoliciesResponseDto result =
+            await _iamSecurityService.GetRiskyPoliciesAsync(cancellationToken);
+        return Ok(result);
+    }
 }
