@@ -34,7 +34,9 @@ public class AuditRepository : IAuditRepository
         _rdsClient = rdsClient;
         _s3Client = s3Client;
         _logger = logger;
-        _requiredTagKey = costOptions.Value.ProjectTagKey;
+        _requiredTagKey = string.IsNullOrWhiteSpace(costOptions.Value.ProjectTagKey)
+            ? "Project"
+            : costOptions.Value.ProjectTagKey;
     }
 
     public async Task<UntaggedResourcesResponseDto> GetUntaggedResourcesByRegionAsync(
@@ -70,6 +72,54 @@ public class AuditRepository : IAuditRepository
         };
     }
 
+    public async Task<ResourcesByProjectTagResponseDto> GetResourcesByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        List<TaggedResourceDto> matching = new();
+        int totalScanned = 0;
+
+        totalScanned += await ScanEc2ByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanRdsByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanS3ByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+
+        _logger.LogInformation(
+            "Project tag search in {Region}: {MatchCount}/{TotalScanned} with {TagKey}={TagValue}",
+            normalizedRegion,
+            matching.Count,
+            totalScanned,
+            _requiredTagKey,
+            projectTagValue);
+
+        return new ResourcesByProjectTagResponseDto
+        {
+            Region = normalizedRegion,
+            ProjectTagKey = _requiredTagKey,
+            ProjectTagValue = projectTagValue,
+            TotalResourcesScanned = totalScanned,
+            MatchingResourcesCount = matching.Count,
+            Resources = matching
+                .OrderBy(r => r.ResourceType, StringComparer.Ordinal)
+                .ThenBy(r => r.ResourceId, StringComparer.Ordinal)
+                .ToList(),
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
     private async Task<int> ScanEc2Async(
         string region,
         List<UntaggedResourceDto> untagged,
@@ -85,8 +135,11 @@ public class AuditRepository : IAuditRepository
                 new DescribeInstancesRequest { NextToken = nextToken },
                 cancellationToken);
 
-            foreach (Reservation reservation in response.Reservations)
-                instances.AddRange(reservation.Instances);
+            foreach (Reservation reservation in response.Reservations ?? [])
+            {
+                if (reservation.Instances is not null)
+                    instances.AddRange(reservation.Instances);
+            }
 
             nextToken = response.NextToken;
         }
@@ -130,7 +183,9 @@ public class AuditRepository : IAuditRepository
                 new DescribeDBInstancesRequest { Marker = marker },
                 cancellationToken);
 
-            instances.AddRange(response.DBInstances);
+            if (response.DBInstances is not null)
+                instances.AddRange(response.DBInstances);
+
             marker = response.Marker;
         }
         while (!string.IsNullOrEmpty(marker));
@@ -166,7 +221,7 @@ public class AuditRepository : IAuditRepository
         ListBucketsResponse listResponse = await _s3Client.ListBucketsAsync(cancellationToken);
         int countInRegion = 0;
 
-        foreach (S3Bucket bucket in listResponse.Buckets)
+        foreach (S3Bucket bucket in listResponse.Buckets ?? [])
         {
             string bucketRegion = await GetBucketRegionAsync(bucket.BucketName, cancellationToken);
             if (!string.Equals(bucketRegion, region, StringComparison.OrdinalIgnoreCase))
@@ -176,7 +231,8 @@ public class AuditRepository : IAuditRepository
 
             try
             {
-                GetBucketTaggingResponse tagging = await _s3Client.GetBucketTaggingAsync(
+                IAmazonS3 regionalClient = GetRegionalS3Client(bucketRegion);
+                GetBucketTaggingResponse tagging = await regionalClient.GetBucketTaggingAsync(
                     new GetBucketTaggingRequest { BucketName = bucket.BucketName },
                     cancellationToken);
 
@@ -202,6 +258,153 @@ public class AuditRepository : IAuditRepository
         return countInRegion;
     }
 
+    private async Task<int> ScanEc2ByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonEC2 client = GetRegionalEc2Client(region);
+        List<Instance> instances = new();
+        string? nextToken = null;
+
+        do
+        {
+            DescribeInstancesResponse response = await client.DescribeInstancesAsync(
+                new DescribeInstancesRequest { NextToken = nextToken },
+                cancellationToken);
+
+            foreach (Reservation reservation in response.Reservations ?? [])
+            {
+                if (reservation.Instances is not null)
+                    instances.AddRange(reservation.Instances);
+            }
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (Instance instance in instances)
+        {
+            string? tagValue = ResourceTagHelper.GetTagValue(instance.Tags, _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            string? name = instance.Tags?
+                .FirstOrDefault(t => string.Equals(t.Key, "Name", StringComparison.OrdinalIgnoreCase))
+                ?.Value;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "EC2",
+                ResourceId = instance.InstanceId,
+                Name = name,
+                Region = region,
+                State = instance.State?.Name?.Value,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return instances.Count;
+    }
+
+    private async Task<int> ScanRdsByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonRDS client = GetRegionalRdsClient(region);
+        List<DBInstance> instances = new();
+        string? marker = null;
+
+        do
+        {
+            DescribeDBInstancesResponse response = await client.DescribeDBInstancesAsync(
+                new DescribeDBInstancesRequest { Marker = marker },
+                cancellationToken);
+
+            if (response.DBInstances is not null)
+                instances.AddRange(response.DBInstances);
+
+            marker = response.Marker;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        foreach (DBInstance instance in instances)
+        {
+            ListTagsForResourceResponse tagsResponse = await client.ListTagsForResourceAsync(
+                new ListTagsForResourceRequest { ResourceName = instance.DBInstanceArn },
+                cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(tagsResponse.TagList, _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "RDS",
+                ResourceId = instance.DBInstanceIdentifier,
+                Name = instance.DBInstanceIdentifier,
+                Region = region,
+                State = instance.DBInstanceStatus,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return instances.Count;
+    }
+
+    private async Task<int> ScanS3ByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        ListBucketsResponse listResponse = await _s3Client.ListBucketsAsync(cancellationToken);
+        int countInRegion = 0;
+
+        foreach (S3Bucket bucket in listResponse.Buckets ?? [])
+        {
+            string bucketRegion = await GetBucketRegionAsync(bucket.BucketName, cancellationToken);
+            if (!string.Equals(bucketRegion, region, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            countInRegion++;
+
+            string? tagValue = null;
+
+            try
+            {
+                IAmazonS3 regionalClient = GetRegionalS3Client(bucketRegion);
+                GetBucketTaggingResponse tagging = await regionalClient.GetBucketTaggingAsync(
+                    new GetBucketTaggingRequest { BucketName = bucket.BucketName },
+                    cancellationToken);
+
+                tagValue = ResourceTagHelper.GetTagValue(tagging.TagSet, _requiredTagKey);
+            }
+            catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                // Bucket has no tags
+            }
+
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "S3",
+                ResourceId = bucket.BucketName,
+                Name = bucket.BucketName,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return countInRegion;
+    }
+
     private async Task<string> GetBucketRegionAsync(string bucketName, CancellationToken cancellationToken)
     {
         try
@@ -210,8 +413,7 @@ public class AuditRepository : IAuditRepository
                 new GetBucketLocationRequest { BucketName = bucketName },
                 cancellationToken);
 
-            string? region = location.Location?.Value;
-            return string.IsNullOrEmpty(region) ? "us-east-1" : region;
+            return NormalizeS3Region(location.Location?.Value);
         }
         catch (Exception ex)
         {
@@ -234,6 +436,23 @@ public class AuditRepository : IAuditRepository
             return _rdsClient;
 
         return new AmazonRDSClient(RegionEndpoint.GetBySystemName(region));
+    }
+
+    private IAmazonS3 GetRegionalS3Client(string region)
+    {
+        string normalized = NormalizeS3Region(region);
+        if (string.Equals(_s3Client.Config.RegionEndpoint?.SystemName, normalized, StringComparison.OrdinalIgnoreCase))
+            return _s3Client;
+
+        return new AmazonS3Client(RegionEndpoint.GetBySystemName(normalized));
+    }
+
+    private static string NormalizeS3Region(string? region)
+    {
+        if (string.IsNullOrWhiteSpace(region) || region.Equals("US", StringComparison.OrdinalIgnoreCase))
+            return "us-east-1";
+
+        return region;
     }
 
     private static string NormalizeRegion(string region) =>

@@ -38,6 +38,44 @@ internal static class ResourceTagHelper
             !string.IsNullOrWhiteSpace(tag.Value));
     }
 
+    public static string? GetTagValue(IEnumerable<Tag>? tags, string tagKey)
+    {
+        if (tags is null)
+            return null;
+
+        return tags
+            .FirstOrDefault(tag => string.Equals(tag.Key, tagKey, StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+    }
+
+    public static string? GetTagValue(
+        IEnumerable<Amazon.RDS.Model.Tag>? tags,
+        string tagKey)
+    {
+        if (tags is null)
+            return null;
+
+        return tags
+            .FirstOrDefault(tag => string.Equals(tag.Key, tagKey, StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+    }
+
+    public static string? GetTagValue(
+        IEnumerable<Amazon.S3.Model.Tag>? tags,
+        string tagKey)
+    {
+        if (tags is null)
+            return null;
+
+        return tags
+            .FirstOrDefault(tag => string.Equals(tag.Key, tagKey, StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+    }
+
+    public static bool MatchesTagValue(string? actualValue, string expectedValue) =>
+        !string.IsNullOrWhiteSpace(actualValue) &&
+        string.Equals(actualValue.Trim(), expectedValue.Trim(), StringComparison.OrdinalIgnoreCase);
+
     public static string BuildUntaggedRecommendation(string requiredTagKey) =>
         $"Add the '{requiredTagKey}' tag for cost allocation and governance.";
 }

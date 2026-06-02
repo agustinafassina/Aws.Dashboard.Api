@@ -32,4 +32,31 @@ public class AuditsController : ControllerBase
         UntaggedResourcesResponseDto? result = await _auditService.GetUntaggedResourcesByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("resources-by-project")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetResourcesByProjectTag(
+        [FromQuery] string region,
+        [FromQuery] string projectTagValue,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        if (string.IsNullOrWhiteSpace(projectTagValue))
+            return BadRequest(new { error = "Query parameter 'projectTagValue' is required." });
+
+        _logger.LogInformation(
+            "GetResourcesByProjectTag called for region {Region}, project {ProjectTagValue}",
+            region,
+            projectTagValue);
+
+        ResourcesByProjectTagResponseDto result = await _auditService.GetResourcesByProjectTagAsync(
+            region,
+            projectTagValue,
+            cancellationToken);
+
+        return Ok(result);
+    }
 }

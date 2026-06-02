@@ -1,5 +1,17 @@
 @AwsApi_HostAddress = http://localhost:5142
 
+### Untagged resources (missing project tag) by region
+GET {{AwsApi_HostAddress}}/api/v1/audits/untagged-resources?region=us-east-1
+Accept: application/json
+
+###
+
+### Resources by project tag value
+GET {{AwsApi_HostAddress}}/api/v1/audits/resources-by-project?region=us-east-1&projectTagValue=my-app
+Accept: application/json
+
+###
+
 ### List public S3 buckets by region
 GET {{AwsApi_HostAddress}}/api/v1/s3/public-buckets?region=us-east-1
 Accept: application/json
