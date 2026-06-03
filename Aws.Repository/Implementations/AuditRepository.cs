@@ -3,8 +3,14 @@ using Amazon.EC2;
 using Amazon.EC2.Model;
 using Amazon.RDS;
 using Amazon.RDS.Model;
+using Amazon.Lambda;
+using Amazon.Lambda.Model;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.SimpleNotificationService;
+using Amazon.SimpleNotificationService.Model;
+using Amazon.SQS;
+using Amazon.SQS.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Aws.Models.Configuration;
@@ -20,6 +26,9 @@ public class AuditRepository : IAuditRepository
     private readonly IAmazonEC2 _ec2Client;
     private readonly IAmazonRDS _rdsClient;
     private readonly IAmazonS3 _s3Client;
+    private readonly IAmazonLambda _lambdaClient;
+    private readonly IAmazonSQS _sqsClient;
+    private readonly IAmazonSimpleNotificationService _snsClient;
     private readonly ILogger<AuditRepository> _logger;
     private readonly string _requiredTagKey;
 
@@ -27,12 +36,18 @@ public class AuditRepository : IAuditRepository
         IAmazonEC2 ec2Client,
         IAmazonRDS rdsClient,
         IAmazonS3 s3Client,
+        IAmazonLambda lambdaClient,
+        IAmazonSQS sqsClient,
+        IAmazonSimpleNotificationService snsClient,
         IOptions<CostOptions> costOptions,
         ILogger<AuditRepository> logger)
     {
         _ec2Client = ec2Client;
         _rdsClient = rdsClient;
         _s3Client = s3Client;
+        _lambdaClient = lambdaClient;
+        _sqsClient = sqsClient;
+        _snsClient = snsClient;
         _logger = logger;
         _requiredTagKey = string.IsNullOrWhiteSpace(costOptions.Value.ProjectTagKey)
             ? "Project"
@@ -92,6 +107,21 @@ public class AuditRepository : IAuditRepository
             matching,
             cancellationToken);
         totalScanned += await ScanS3ByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanLambdaByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanSqsByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanSnsByProjectTagAsync(
             normalizedRegion,
             projectTagValue,
             matching,
@@ -192,8 +222,8 @@ public class AuditRepository : IAuditRepository
 
         foreach (DBInstance instance in instances)
         {
-            ListTagsForResourceResponse tagsResponse = await client.ListTagsForResourceAsync(
-                new ListTagsForResourceRequest { ResourceName = instance.DBInstanceArn },
+            Amazon.RDS.Model.ListTagsForResourceResponse tagsResponse = await client.ListTagsForResourceAsync(
+                new Amazon.RDS.Model.ListTagsForResourceRequest { ResourceName = instance.DBInstanceArn },
                 cancellationToken);
 
             if (ResourceTagHelper.HasRequiredTag(tagsResponse.TagList, _requiredTagKey))
@@ -333,8 +363,8 @@ public class AuditRepository : IAuditRepository
 
         foreach (DBInstance instance in instances)
         {
-            ListTagsForResourceResponse tagsResponse = await client.ListTagsForResourceAsync(
-                new ListTagsForResourceRequest { ResourceName = instance.DBInstanceArn },
+            Amazon.RDS.Model.ListTagsForResourceResponse tagsResponse = await client.ListTagsForResourceAsync(
+                new Amazon.RDS.Model.ListTagsForResourceRequest { ResourceName = instance.DBInstanceArn },
                 cancellationToken);
 
             string? tagValue = ResourceTagHelper.GetTagValue(tagsResponse.TagList, _requiredTagKey);
@@ -405,6 +435,163 @@ public class AuditRepository : IAuditRepository
         return countInRegion;
     }
 
+    private async Task<int> ScanLambdaByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonLambda client = GetRegionalLambdaClient(region);
+        List<FunctionConfiguration> functions = new();
+        string? marker = null;
+
+        do
+        {
+            ListFunctionsResponse response = await client.ListFunctionsAsync(
+                new ListFunctionsRequest { Marker = marker },
+                cancellationToken);
+
+            if (response.Functions is not null)
+                functions.AddRange(response.Functions);
+
+            marker = response.NextMarker;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        foreach (FunctionConfiguration function in functions)
+        {
+            if (string.IsNullOrWhiteSpace(function.FunctionArn))
+                continue;
+
+            ListTagsResponse tagsResponse = await client.ListTagsAsync(
+                new ListTagsRequest { Resource = function.FunctionArn },
+                cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(tagsResponse.Tags, _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "Lambda",
+                ResourceId = function.FunctionName ?? function.FunctionArn,
+                Name = function.FunctionName,
+                Region = region,
+                State = function.State?.Value,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return functions.Count;
+    }
+
+    private async Task<int> ScanSqsByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonSQS client = GetRegionalSqsClient(region);
+        List<string> queueUrls = new();
+        string? nextToken = null;
+
+        do
+        {
+            ListQueuesResponse response = await client.ListQueuesAsync(
+                new ListQueuesRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.QueueUrls is not null)
+                queueUrls.AddRange(response.QueueUrls);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (string queueUrl in queueUrls)
+        {
+            ListQueueTagsResponse tagsResponse = await client.ListQueueTagsAsync(
+                new ListQueueTagsRequest { QueueUrl = queueUrl },
+                cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(tagsResponse.Tags, _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            string queueName = GetQueueNameFromUrl(queueUrl);
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "SQS",
+                ResourceId = queueName,
+                Name = queueName,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return queueUrls.Count;
+    }
+
+    private async Task<int> ScanSnsByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonSimpleNotificationService client = GetRegionalSnsClient(region);
+        List<Topic> topics = new();
+        string? nextToken = null;
+
+        do
+        {
+            ListTopicsResponse response = await client.ListTopicsAsync(
+                new ListTopicsRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.Topics is not null)
+                topics.AddRange(response.Topics);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (Topic topic in topics)
+        {
+            if (string.IsNullOrWhiteSpace(topic.TopicArn))
+                continue;
+
+            Amazon.SimpleNotificationService.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.SimpleNotificationService.Model.ListTagsForResourceRequest
+                    {
+                        ResourceArn = topic.TopicArn
+                    },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(
+                ToTagDictionary(tagsResponse.Tags),
+                _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            string topicName = GetSnsTopicNameFromArn(topic.TopicArn);
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "SNS",
+                ResourceId = topic.TopicArn,
+                Name = topicName,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return topics.Count;
+    }
+
     private async Task<string> GetBucketRegionAsync(string bucketName, CancellationToken cancellationToken)
     {
         try
@@ -445,6 +632,58 @@ public class AuditRepository : IAuditRepository
             return _s3Client;
 
         return new AmazonS3Client(RegionEndpoint.GetBySystemName(normalized));
+    }
+
+    private IAmazonLambda GetRegionalLambdaClient(string region)
+    {
+        if (string.Equals(_lambdaClient.Config.RegionEndpoint?.SystemName, region, StringComparison.OrdinalIgnoreCase))
+            return _lambdaClient;
+
+        return new AmazonLambdaClient(RegionEndpoint.GetBySystemName(region));
+    }
+
+    private IAmazonSQS GetRegionalSqsClient(string region)
+    {
+        if (string.Equals(_sqsClient.Config.RegionEndpoint?.SystemName, region, StringComparison.OrdinalIgnoreCase))
+            return _sqsClient;
+
+        return new AmazonSQSClient(RegionEndpoint.GetBySystemName(region));
+    }
+
+    private IAmazonSimpleNotificationService GetRegionalSnsClient(string region)
+    {
+        if (string.Equals(_snsClient.Config.RegionEndpoint?.SystemName, region, StringComparison.OrdinalIgnoreCase))
+            return _snsClient;
+
+        return new AmazonSimpleNotificationServiceClient(RegionEndpoint.GetBySystemName(region));
+    }
+
+    private static Dictionary<string, string>? ToTagDictionary(
+        IEnumerable<Amazon.SimpleNotificationService.Model.Tag>? tags)
+    {
+        if (tags is null)
+            return null;
+
+        Dictionary<string, string> result = new(StringComparer.OrdinalIgnoreCase);
+        foreach (Amazon.SimpleNotificationService.Model.Tag tag in tags)
+        {
+            if (!string.IsNullOrWhiteSpace(tag.Key))
+                result[tag.Key] = tag.Value ?? string.Empty;
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
+    private static string GetQueueNameFromUrl(string queueUrl)
+    {
+        int lastSlash = queueUrl.LastIndexOf('/');
+        return lastSlash >= 0 ? queueUrl[(lastSlash + 1)..] : queueUrl;
+    }
+
+    private static string GetSnsTopicNameFromArn(string topicArn)
+    {
+        int lastColon = topicArn.LastIndexOf(':');
+        return lastColon >= 0 ? topicArn[(lastColon + 1)..] : topicArn;
     }
 
     private static string NormalizeS3Region(string? region)

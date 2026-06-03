@@ -72,6 +72,20 @@ internal static class ResourceTagHelper
             ?.Value;
     }
 
+    public static string? GetTagValue(IReadOnlyDictionary<string, string>? tags, string tagKey)
+    {
+        if (tags is null || tags.Count == 0)
+            return null;
+
+        foreach (KeyValuePair<string, string> tag in tags)
+        {
+            if (string.Equals(tag.Key, tagKey, StringComparison.OrdinalIgnoreCase))
+                return tag.Value;
+        }
+
+        return null;
+    }
+
     public static bool MatchesTagValue(string? actualValue, string expectedValue) =>
         !string.IsNullOrWhiteSpace(actualValue) &&
         string.Equals(actualValue.Trim(), expectedValue.Trim(), StringComparison.OrdinalIgnoreCase);
