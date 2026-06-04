@@ -72,6 +72,9 @@ internal static class ResourceTagHelper
             ?.Value;
     }
 
+    public static bool HasRequiredTag(IReadOnlyDictionary<string, string>? tags, string requiredTagKey) =>
+        !string.IsNullOrWhiteSpace(GetTagValue(tags, requiredTagKey));
+
     public static string? GetTagValue(IReadOnlyDictionary<string, string>? tags, string tagKey)
     {
         if (tags is null || tags.Count == 0)
