@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="AWSSDK.CertificateManager" Version="4.0.3" />
     <PackageReference Include="AWSSDK.CloudWatch" Version="4.0.3" />
     <PackageReference Include="AWSSDK.CloudWatchLogs" Version="4.0.3" />
     <PackageReference Include="AWSSDK.CostExplorer" Version="4.0.11.23" />

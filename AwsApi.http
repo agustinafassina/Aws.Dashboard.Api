@@ -30,6 +30,12 @@ Accept: application/json
 
 ###
 
+### List ACM certificates expiring within N days by region
+GET {{AwsApi_HostAddress}}/api/v1/acm/expiring-certificates?region=us-east-1&days=30
+Accept: application/json
+
+###
+
 ### List EC2 instances with open inbound ports by region
 GET {{AwsApi_HostAddress}}/api/v1/ec2/open-ports?region=us-east-1
 Accept: application/json

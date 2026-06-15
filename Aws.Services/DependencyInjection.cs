@@ -13,6 +13,7 @@ namespace Aws.Services
             services.AddTransient<IItemService, ItemService>();
             services.AddTransient<IS3SecurityService, S3SecurityService>();
             services.AddTransient<ILambdaSecurityService, LambdaSecurityService>();
+            services.AddTransient<IAcmSecurityService, AcmSecurityService>();
             services.AddTransient<IEc2SecurityService, Ec2SecurityService>();
             services.AddTransient<IRdsSecurityService, RdsSecurityService>();
             services.AddTransient<IIamSecurityService, IamSecurityService>();

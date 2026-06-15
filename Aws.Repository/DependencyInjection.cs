@@ -11,6 +11,7 @@ namespace Aws.Repository
             services.AddSingleton<IItemRepository, ItemRepository>();
             services.AddScoped<IS3Repository, S3Repository>();
             services.AddScoped<ILambdaRepository, LambdaRepository>();
+            services.AddScoped<IAcmRepository, AcmRepository>();
             services.AddScoped<IEc2Repository, Ec2Repository>();
             services.AddScoped<IRdsRepository, RdsRepository>();
             services.AddScoped<IIamRepository, IamRepository>();

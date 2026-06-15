@@ -29,6 +29,7 @@ builder.Services.AddAWSService<Amazon.DynamoDBv2.IAmazonDynamoDB>();
 builder.Services.AddAWSService<Amazon.WAFV2.IAmazonWAFV2>();
 builder.Services.AddAWSService<Amazon.CloudWatch.IAmazonCloudWatch>();
 builder.Services.AddAWSService<Amazon.CloudWatchLogs.IAmazonCloudWatchLogs>();
+builder.Services.AddAWSService<Amazon.CertificateManager.IAmazonCertificateManager>();
 builder.Services.Configure<S3Options>(configuration.GetSection(S3Options.SectionName));
 builder.Services.Configure<Ec2Options>(configuration.GetSection(Ec2Options.SectionName));
 builder.Services.Configure<RdsOptions>(configuration.GetSection(RdsOptions.SectionName));
