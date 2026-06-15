@@ -92,6 +92,98 @@ public class Ec2Repository : IEc2Repository
         };
     }
 
+    public async Task<Ec2UnattachedVolumesResponseDto> GetUnattachedVolumesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        IAmazonEC2 client = GetRegionalClient(normalizedRegion);
+
+        List<Volume> allVolumes = await ListAllVolumesAsync(client, cancellationToken);
+        List<Ec2UnattachedVolumeDto> unattachedVolumes = allVolumes
+            .Where(IsUnattached)
+            .Select(MapUnattachedVolume)
+            .OrderBy(volume => volume.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(volume => volume.VolumeId, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {UnattachedCount}/{TotalCount} unattached EBS volumes in region {Region}",
+            unattachedVolumes.Count,
+            allVolumes.Count,
+            normalizedRegion);
+
+        return new Ec2UnattachedVolumesResponseDto
+        {
+            Region = normalizedRegion,
+            TotalVolumes = allVolumes.Count,
+            UnattachedVolumesCount = unattachedVolumes.Count,
+            TotalUnattachedSizeGiB = unattachedVolumes.Sum(volume => volume.SizeGiB),
+            Volumes = unattachedVolumes,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static async Task<List<Volume>> ListAllVolumesAsync(
+        IAmazonEC2 client,
+        CancellationToken cancellationToken)
+    {
+        List<Volume> volumes = new();
+        string? nextToken = null;
+
+        do
+        {
+            DescribeVolumesResponse response = await client.DescribeVolumesAsync(
+                new DescribeVolumesRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.Volumes is not null)
+                volumes.AddRange(response.Volumes);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        return volumes;
+    }
+
+    private static bool IsUnattached(Volume volume) =>
+        volume.Attachments is null ||
+        volume.Attachments.Count == 0 ||
+        !volume.Attachments.Any(attachment =>
+            string.Equals(attachment.State, VolumeAttachmentState.Attached, StringComparison.OrdinalIgnoreCase));
+
+    private static Ec2UnattachedVolumeDto MapUnattachedVolume(Volume volume)
+    {
+        string? name = volume.Tags?
+            .FirstOrDefault(tag => string.Equals(tag.Key, "Name", StringComparison.OrdinalIgnoreCase))
+            ?.Value;
+
+        bool encrypted = volume.Encrypted == true;
+
+        return new Ec2UnattachedVolumeDto
+        {
+            VolumeId = volume.VolumeId,
+            Name = name,
+            SizeGiB = volume.Size ?? 0,
+            VolumeType = volume.VolumeType?.Value,
+            State = volume.State?.Value,
+            Encrypted = encrypted,
+            SnapshotId = volume.SnapshotId,
+            AvailabilityZone = volume.AvailabilityZone,
+            CreatedAt = volume.CreateTime,
+            Recommendation = BuildUnattachedVolumeRecommendation(encrypted)
+        };
+    }
+
+    private static string BuildUnattachedVolumeRecommendation(bool encrypted)
+    {
+        if (!encrypted)
+            return "EBS volume is not attached to any instance and is not encrypted; create a snapshot if needed, enable encryption on replacement volumes, then delete to reduce cost.";
+
+        return "EBS volume is not attached to any instance; create a snapshot if needed, then delete to reduce cost.";
+    }
+
     private async Task<List<SecurityGroup>> ListAllSecurityGroupsAsync(
         IAmazonEC2 client,
         CancellationToken cancellationToken)

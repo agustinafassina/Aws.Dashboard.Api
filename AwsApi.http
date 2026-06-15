@@ -30,6 +30,12 @@ Accept: application/json
 
 ###
 
+### List unattached EBS volumes by region
+GET {{AwsApi_HostAddress}}/api/v1/ec2/unattached-volumes?region=us-east-1
+Accept: application/json
+
+###
+
 ### List RDS instances with open inbound ports by region
 GET {{AwsApi_HostAddress}}/api/v1/rds/open-ports?region=us-east-1
 Accept: application/json

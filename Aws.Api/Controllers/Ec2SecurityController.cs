@@ -48,4 +48,21 @@ public class Ec2SecurityController : ControllerBase
             await _ec2SecurityService.GetUnusedSecurityGroupsByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("unattached-volumes")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetUnattachedVolumes(
+        [FromQuery] string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        _logger.LogInformation("GetUnattachedVolumes called for region {Region}", region);
+
+        Models.Dto.Ec2UnattachedVolumesResponseDto result =
+            await _ec2SecurityService.GetUnattachedVolumesByRegionAsync(region, cancellationToken);
+        return Ok(result);
+    }
 }

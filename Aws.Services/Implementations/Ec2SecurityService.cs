@@ -54,4 +54,25 @@ public class Ec2SecurityService : IEc2SecurityService
 
         return result;
     }
+
+    public async Task<Ec2UnattachedVolumesResponseDto> GetUnattachedVolumesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning unattached EBS volumes in region {Region}", region);
+        Ec2UnattachedVolumesResponseDto result =
+            await _ec2Repository.GetUnattachedVolumesByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "Unattached volume scan complete for region {Region}: {UnattachedCount}/{TotalCount} volumes ({TotalGiB} GiB unattached)",
+            result.Region,
+            result.UnattachedVolumesCount,
+            result.TotalVolumes,
+            result.TotalUnattachedSizeGiB);
+
+        return result;
+    }
 }

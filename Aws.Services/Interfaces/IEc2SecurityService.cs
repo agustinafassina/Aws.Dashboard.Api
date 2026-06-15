@@ -11,4 +11,8 @@ public interface IEc2SecurityService
     Task<Ec2UnusedSecurityGroupsResponseDto> GetUnusedSecurityGroupsByRegionAsync(
         string region,
         CancellationToken cancellationToken = default);
+
+    Task<Ec2UnattachedVolumesResponseDto> GetUnattachedVolumesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default);
 }
