@@ -34,4 +34,24 @@ public class S3SecurityService : IS3SecurityService
 
         return result;
     }
+
+    public async Task<S3EncryptionStatusResponseDto> GetEncryptionStatusByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning S3 bucket encryption in region {Region}", region);
+        S3EncryptionStatusResponseDto result =
+            await _s3Repository.GetEncryptionStatusByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "Encryption scan complete for region {Region}: {UnencryptedCount}/{TotalCount} buckets without default encryption",
+            result.Region,
+            result.UnencryptedBucketsCount,
+            result.TotalBucketsInRegion);
+
+        return result;
+    }
 }

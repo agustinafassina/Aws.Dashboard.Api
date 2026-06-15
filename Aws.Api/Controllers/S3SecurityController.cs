@@ -31,4 +31,21 @@ public class S3SecurityController : ControllerBase
         var result = await _s3SecurityService.GetPublicBucketsByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("encryption-status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetEncryptionStatus(
+        [FromQuery] string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        _logger.LogInformation("GetEncryptionStatus called for region {Region}", region);
+
+        Models.Dto.S3EncryptionStatusResponseDto result =
+            await _s3SecurityService.GetEncryptionStatusByRegionAsync(region, cancellationToken);
+        return Ok(result);
+    }
 }

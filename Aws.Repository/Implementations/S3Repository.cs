@@ -40,7 +40,7 @@ public class S3Repository : IS3Repository
         ListBucketsResponse listResponse = await _s3Client.ListBucketsAsync(cancellationToken);
         List<S3Bucket> bucketsInRegion = new();
 
-        foreach (S3Bucket bucket in listResponse.Buckets)
+        foreach (S3Bucket bucket in listResponse.Buckets ?? [])
         {
             string bucketRegion = await GetBucketRegionAsync(bucket.BucketName, cancellationToken);
             if (string.Equals(bucketRegion, normalizedRegion, StringComparison.OrdinalIgnoreCase))
@@ -78,6 +78,82 @@ public class S3Repository : IS3Repository
             PublicBuckets = publicBuckets,
             ScannedAt = DateTime.UtcNow
         };
+    }
+
+    public async Task<S3EncryptionStatusResponseDto> GetEncryptionStatusByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        ListBucketsResponse listResponse = await _s3Client.ListBucketsAsync(cancellationToken);
+        List<S3Bucket> bucketsInRegion = new();
+
+        foreach (S3Bucket bucket in listResponse.Buckets ?? [])
+        {
+            string bucketRegion = await GetBucketRegionAsync(bucket.BucketName, cancellationToken);
+            if (string.Equals(bucketRegion, normalizedRegion, StringComparison.OrdinalIgnoreCase))
+                bucketsInRegion.Add(bucket);
+        }
+
+        _logger.LogInformation(
+            "Found {Count} buckets in region {Region}, analyzing default encryption",
+            bucketsInRegion.Count,
+            normalizedRegion);
+
+        List<S3BucketEncryptionDto> unencryptedBuckets = new();
+
+        foreach (S3Bucket bucket in bucketsInRegion)
+        {
+            bool hasDefaultEncryption = await HasDefaultEncryptionAsync(
+                bucket.BucketName,
+                normalizedRegion,
+                cancellationToken);
+
+            if (hasDefaultEncryption)
+                continue;
+
+            unencryptedBuckets.Add(new S3BucketEncryptionDto
+            {
+                Name = bucket.BucketName,
+                Region = normalizedRegion,
+                CreationDate = bucket.CreationDate.GetValueOrDefault(),
+                Recommendation = "Enable default bucket encryption with SSE-S3 or SSE-KMS for all new objects."
+            });
+        }
+
+        return new S3EncryptionStatusResponseDto
+        {
+            Region = normalizedRegion,
+            TotalBucketsInRegion = bucketsInRegion.Count,
+            UnencryptedBucketsCount = unencryptedBuckets.Count,
+            UnencryptedBuckets = unencryptedBuckets
+                .OrderBy(bucket => bucket.Name, StringComparer.Ordinal)
+                .ToList(),
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private async Task<bool> HasDefaultEncryptionAsync(
+        string bucketName,
+        string bucketRegion,
+        CancellationToken cancellationToken)
+    {
+        IAmazonS3 regionalClient = GetRegionalClient(bucketRegion);
+
+        try
+        {
+            GetBucketEncryptionResponse response = await regionalClient.GetBucketEncryptionAsync(
+                new GetBucketEncryptionRequest { BucketName = bucketName },
+                cancellationToken);
+
+            return response.ServerSideEncryptionConfiguration?.ServerSideEncryptionRules?
+                .Any(rule =>
+                    !string.IsNullOrWhiteSpace(rule.ServerSideEncryptionByDefault?.ServerSideEncryptionAlgorithm?.Value)) == true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
     }
 
     private async Task<string> GetBucketRegionAsync(string bucketName, CancellationToken cancellationToken)

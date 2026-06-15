@@ -18,6 +18,18 @@ Accept: application/json
 
 ###
 
+### List S3 buckets without default encryption by region
+GET {{AwsApi_HostAddress}}/api/v1/s3/encryption-status?region=us-east-1
+Accept: application/json
+
+###
+
+### List publicly accessible Lambda functions by region
+GET {{AwsApi_HostAddress}}/api/v1/lambda/public-functions?region=us-east-1
+Accept: application/json
+
+###
+
 ### List EC2 instances with open inbound ports by region
 GET {{AwsApi_HostAddress}}/api/v1/ec2/open-ports?region=us-east-1
 Accept: application/json
