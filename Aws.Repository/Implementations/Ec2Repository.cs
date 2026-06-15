@@ -59,6 +59,113 @@ public class Ec2Repository : IEc2Repository
         };
     }
 
+    public async Task<Ec2UnusedSecurityGroupsResponseDto> GetUnusedSecurityGroupsByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        IAmazonEC2 client = GetRegionalClient(normalizedRegion);
+
+        List<SecurityGroup> allSecurityGroups = await ListAllSecurityGroupsAsync(client, cancellationToken);
+        HashSet<string> securityGroupsInUse = await ListSecurityGroupIdsAttachedToEnisAsync(client, cancellationToken);
+
+        List<Ec2UnusedSecurityGroupDto> unusedSecurityGroups = allSecurityGroups
+            .Where(group => !securityGroupsInUse.Contains(group.GroupId))
+            .Select(MapUnusedSecurityGroup)
+            .OrderBy(group => group.GroupName, StringComparer.Ordinal)
+            .ThenBy(group => group.GroupId, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {UnusedCount}/{TotalCount} unused security groups in region {Region}",
+            unusedSecurityGroups.Count,
+            allSecurityGroups.Count,
+            normalizedRegion);
+
+        return new Ec2UnusedSecurityGroupsResponseDto
+        {
+            Region = normalizedRegion,
+            TotalSecurityGroups = allSecurityGroups.Count,
+            UnusedSecurityGroupsCount = unusedSecurityGroups.Count,
+            SecurityGroups = unusedSecurityGroups,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private async Task<List<SecurityGroup>> ListAllSecurityGroupsAsync(
+        IAmazonEC2 client,
+        CancellationToken cancellationToken)
+    {
+        List<SecurityGroup> securityGroups = new();
+        string? nextToken = null;
+
+        do
+        {
+            DescribeSecurityGroupsResponse response = await client.DescribeSecurityGroupsAsync(
+                new DescribeSecurityGroupsRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.SecurityGroups is not null)
+                securityGroups.AddRange(response.SecurityGroups);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        return securityGroups;
+    }
+
+    private static async Task<HashSet<string>> ListSecurityGroupIdsAttachedToEnisAsync(
+        IAmazonEC2 client,
+        CancellationToken cancellationToken)
+    {
+        HashSet<string> securityGroupsInUse = new(StringComparer.Ordinal);
+        string? nextToken = null;
+
+        do
+        {
+            DescribeNetworkInterfacesResponse response = await client.DescribeNetworkInterfacesAsync(
+                new DescribeNetworkInterfacesRequest { NextToken = nextToken },
+                cancellationToken);
+
+            foreach (NetworkInterface networkInterface in response.NetworkInterfaces ?? [])
+            {
+                foreach (GroupIdentifier group in networkInterface.Groups ?? [])
+                {
+                    if (!string.IsNullOrWhiteSpace(group.GroupId))
+                        securityGroupsInUse.Add(group.GroupId);
+                }
+            }
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        return securityGroupsInUse;
+    }
+
+    private static Ec2UnusedSecurityGroupDto MapUnusedSecurityGroup(SecurityGroup securityGroup)
+    {
+        bool isDefault = string.Equals(securityGroup.GroupName, "default", StringComparison.OrdinalIgnoreCase);
+
+        return new Ec2UnusedSecurityGroupDto
+        {
+            GroupId = securityGroup.GroupId,
+            GroupName = securityGroup.GroupName,
+            Description = securityGroup.Description,
+            VpcId = securityGroup.VpcId,
+            IsDefaultSecurityGroup = isDefault,
+            InboundRuleCount = securityGroup.IpPermissions?.Count ?? 0,
+            OutboundRuleCount = securityGroup.IpPermissionsEgress?.Count ?? 0,
+            Recommendation = BuildUnusedSecurityGroupRecommendation(isDefault)
+        };
+    }
+
+    private static string BuildUnusedSecurityGroupRecommendation(bool isDefaultSecurityGroup) =>
+        isDefaultSecurityGroup
+            ? "Default VPC security group; it cannot be deleted. Tighten inbound and outbound rules if no ENI uses it."
+            : "No ENI references this security group; review dependencies and delete if it is no longer needed.";
+
     private async Task<List<Instance>> ListInstancesAsync(
         IAmazonEC2 client,
         CancellationToken cancellationToken)

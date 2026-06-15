@@ -31,4 +31,21 @@ public class Ec2SecurityController : ControllerBase
         var result = await _ec2SecurityService.GetInstancesWithOpenPortsByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("unused-security-groups")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetUnusedSecurityGroups(
+        [FromQuery] string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        _logger.LogInformation("GetUnusedSecurityGroups called for region {Region}", region);
+
+        Models.Dto.Ec2UnusedSecurityGroupsResponseDto result =
+            await _ec2SecurityService.GetUnusedSecurityGroupsByRegionAsync(region, cancellationToken);
+        return Ok(result);
+    }
 }

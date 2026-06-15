@@ -24,6 +24,12 @@ Accept: application/json
 
 ###
 
+### List EC2 security groups not attached to any ENI by region
+GET {{AwsApi_HostAddress}}/api/v1/ec2/unused-security-groups?region=us-east-1
+Accept: application/json
+
+###
+
 ### List RDS instances with open inbound ports by region
 GET {{AwsApi_HostAddress}}/api/v1/rds/open-ports?region=us-east-1
 Accept: application/json

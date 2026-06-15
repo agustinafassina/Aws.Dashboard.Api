@@ -34,4 +34,24 @@ public class Ec2SecurityService : IEc2SecurityService
 
         return result;
     }
+
+    public async Task<Ec2UnusedSecurityGroupsResponseDto> GetUnusedSecurityGroupsByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning unused EC2 security groups in region {Region}", region);
+        Ec2UnusedSecurityGroupsResponseDto result =
+            await _ec2Repository.GetUnusedSecurityGroupsByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "Unused security group scan complete for region {Region}: {UnusedCount}/{TotalCount} without ENI attachments",
+            result.Region,
+            result.UnusedSecurityGroupsCount,
+            result.TotalSecurityGroups);
+
+        return result;
+    }
 }
