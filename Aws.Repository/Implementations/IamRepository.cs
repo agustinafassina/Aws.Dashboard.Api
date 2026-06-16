@@ -1,5 +1,7 @@
 using Amazon.IdentityManagement;
 using Amazon.IdentityManagement.Model;
+using Amazon.SecurityToken;
+using Amazon.SecurityToken.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Aws.Models.Configuration;
@@ -14,6 +16,7 @@ public class IamRepository : IIamRepository
     private readonly IAmazonIdentityManagementService _iamClient;
     private readonly ILogger<IamRepository> _logger;
     private readonly int _rotationMaxAgeDays;
+    private string? _accountId;
 
     public IamRepository(
         IAmazonIdentityManagementService iamClient,
@@ -236,6 +239,335 @@ public class IamRepository : IIamRepository
                 .ToList(),
             ScannedAt = DateTime.UtcNow,
         };
+    }
+
+    public async Task<IamAdminPrivilegeGrantsResponseDto> GetAdminPrivilegeGrantsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        List<User> users = await ListUsersAsync(cancellationToken);
+        List<Group> groups = await ListGroupsAsync(cancellationToken);
+        List<Role> roles = await ListRolesAsync(cancellationToken);
+        List<IamAdminPrivilegeGrantDto> grants = new();
+
+        foreach (Role role in roles)
+        {
+            if (string.IsNullOrWhiteSpace(role.RoleName))
+                continue;
+
+            await CollectAttachedPolicyGrantsAsync(
+                grants,
+                principalType: "Role",
+                principalName: role.RoleName,
+                principalArn: role.Arn,
+                attachmentType: "Direct",
+                inheritedFromGroup: null,
+                listAttachedPolicies: () => ListAttachedRolePoliciesAsync(role.RoleName, cancellationToken));
+        }
+
+        foreach (Group group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.GroupName))
+                continue;
+
+            await CollectAttachedPolicyGrantsAsync(
+                grants,
+                principalType: "Group",
+                principalName: group.GroupName,
+                principalArn: group.Arn,
+                attachmentType: "Direct",
+                inheritedFromGroup: null,
+                listAttachedPolicies: () => ListAttachedGroupPoliciesAsync(group.GroupName, cancellationToken));
+        }
+
+        foreach (User user in users)
+        {
+            if (string.IsNullOrWhiteSpace(user.UserName))
+                continue;
+
+            await CollectAttachedPolicyGrantsAsync(
+                grants,
+                principalType: "User",
+                principalName: user.UserName,
+                principalArn: user.Arn,
+                attachmentType: "Direct",
+                inheritedFromGroup: null,
+                listAttachedPolicies: () => ListAttachedUserPoliciesAsync(user.UserName, cancellationToken));
+
+            List<Group> userGroups = await ListGroupsForUserAsync(user.UserName, cancellationToken);
+            foreach (Group group in userGroups)
+            {
+                if (string.IsNullOrWhiteSpace(group.GroupName))
+                    continue;
+
+                await CollectAttachedPolicyGrantsAsync(
+                    grants,
+                    principalType: "User",
+                    principalName: user.UserName,
+                    principalArn: user.Arn,
+                    attachmentType: "InheritedFromGroup",
+                    inheritedFromGroup: group.GroupName,
+                    listAttachedPolicies: () => ListAttachedGroupPoliciesAsync(group.GroupName, cancellationToken));
+            }
+        }
+
+        List<IamAdminPrivilegeGrantDto> orderedGrants = grants
+            .OrderBy(grant => grant.PrincipalType, StringComparer.Ordinal)
+            .ThenBy(grant => grant.PrincipalName, StringComparer.Ordinal)
+            .ThenBy(grant => grant.PolicyName, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {GrantCount} admin privilege grants across {UserCount} users, {GroupCount} groups, {RoleCount} roles",
+            orderedGrants.Count,
+            users.Count,
+            groups.Count,
+            roles.Count);
+
+        return new IamAdminPrivilegeGrantsResponseDto
+        {
+            TotalUsersScanned = users.Count,
+            TotalGroupsScanned = groups.Count,
+            TotalRolesScanned = roles.Count,
+            AdminPrivilegeGrantCount = orderedGrants.Count,
+            UsersWithAdminAccess = orderedGrants
+                .Where(grant => string.Equals(grant.PrincipalType, "User", StringComparison.Ordinal))
+                .Select(grant => grant.PrincipalName)
+                .Distinct(StringComparer.Ordinal)
+                .Count(),
+            GroupsWithAdminAccess = orderedGrants
+                .Where(grant => string.Equals(grant.PrincipalType, "Group", StringComparison.Ordinal))
+                .Select(grant => grant.PrincipalName)
+                .Distinct(StringComparer.Ordinal)
+                .Count(),
+            RolesWithAdminAccess = orderedGrants
+                .Where(grant => string.Equals(grant.PrincipalType, "Role", StringComparison.Ordinal))
+                .Select(grant => grant.PrincipalName)
+                .Distinct(StringComparer.Ordinal)
+                .Count(),
+            Grants = orderedGrants,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    public async Task<IamCrossAccountRolesResponseDto> GetCrossAccountRolesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        string currentAccountId = await ResolveAccountIdAsync(cancellationToken);
+        List<Role> roles = await ListRolesAsync(cancellationToken);
+        List<IamCrossAccountRoleDto> crossAccountRoles = new();
+
+        foreach (Role role in roles)
+        {
+            if (string.IsNullOrWhiteSpace(role.RoleName))
+                continue;
+
+            string trustDocument = IamPolicyRiskAnalyzer.DecodePolicyDocument(role.AssumeRolePolicyDocument);
+            IReadOnlyList<IamTrustPolicyAnalyzer.CrossAccountTrustFinding> findings =
+                IamTrustPolicyAnalyzer.AnalyzeCrossAccountTrust(trustDocument, currentAccountId);
+
+            if (findings.Count == 0)
+                continue;
+
+            crossAccountRoles.Add(new IamCrossAccountRoleDto
+            {
+                RoleName = role.RoleName,
+                RoleArn = role.Arn ?? string.Empty,
+                TrustRiskReason = string.Join("; ", findings.Select(finding => finding.RiskReason).Distinct()),
+                TrustedPrincipals = findings
+                    .Select(finding => finding.Principal)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList(),
+                AllowsAnyPrincipal = findings.Any(finding => finding.AllowsAnyPrincipal),
+                Recommendation = IamTrustPolicyAnalyzer.BuildRecommendation(findings)
+            });
+        }
+
+        List<IamCrossAccountRoleDto> orderedRoles = crossAccountRoles
+            .OrderBy(role => role.AllowsAnyPrincipal ? 0 : 1)
+            .ThenBy(role => role.RoleName, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {CrossAccountCount}/{TotalCount} IAM roles with cross-account or wildcard trust",
+            orderedRoles.Count,
+            roles.Count);
+
+        return new IamCrossAccountRolesResponseDto
+        {
+            CurrentAccountId = currentAccountId,
+            TotalRolesScanned = roles.Count,
+            CrossAccountRolesCount = orderedRoles.Count,
+            Roles = orderedRoles,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private async Task<string> ResolveAccountIdAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_accountId))
+            return _accountId;
+
+        using AmazonSecurityTokenServiceClient stsClient = new();
+        GetCallerIdentityResponse identity = await stsClient.GetCallerIdentityAsync(
+            new GetCallerIdentityRequest(),
+            cancellationToken);
+
+        _accountId = identity.Account;
+        return _accountId;
+    }
+
+    private sealed record AttachedPolicyInfo(string? PolicyArn, string? PolicyName);
+
+    private static async Task CollectAttachedPolicyGrantsAsync(
+        List<IamAdminPrivilegeGrantDto> grants,
+        string principalType,
+        string principalName,
+        string? principalArn,
+        string attachmentType,
+        string? inheritedFromGroup,
+        Func<Task<List<AttachedPolicyInfo>>> listAttachedPolicies)
+    {
+        List<AttachedPolicyInfo> attachedPolicies = await listAttachedPolicies();
+
+        foreach (AttachedPolicyInfo attachedPolicy in attachedPolicies)
+        {
+            if (!IamAdminPolicyClassifier.TryGetPrivilegeLevel(
+                    attachedPolicy.PolicyArn,
+                    attachedPolicy.PolicyName,
+                    out string privilegeLevel))
+            {
+                continue;
+            }
+
+            grants.Add(new IamAdminPrivilegeGrantDto
+            {
+                PrincipalType = principalType,
+                PrincipalName = principalName,
+                PrincipalArn = principalArn,
+                PolicyArn = attachedPolicy.PolicyArn ?? string.Empty,
+                PolicyName = attachedPolicy.PolicyName ?? string.Empty,
+                PrivilegeLevel = privilegeLevel,
+                AttachmentType = attachmentType,
+                InheritedFromGroup = inheritedFromGroup,
+                Recommendation = IamAdminPolicyClassifier.BuildRecommendation(privilegeLevel)
+            });
+        }
+    }
+
+    private async Task<List<AttachedPolicyInfo>> ListAttachedUserPoliciesAsync(
+        string userName,
+        CancellationToken cancellationToken) =>
+        await ListAttachedPoliciesAsync(
+            marker => _iamClient.ListAttachedUserPoliciesAsync(
+                new ListAttachedUserPoliciesRequest { UserName = userName, Marker = marker },
+                cancellationToken),
+            response => response.AttachedPolicies?.Select(MapAttachedPolicy) ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private async Task<List<AttachedPolicyInfo>> ListAttachedGroupPoliciesAsync(
+        string groupName,
+        CancellationToken cancellationToken) =>
+        await ListAttachedPoliciesAsync(
+            marker => _iamClient.ListAttachedGroupPoliciesAsync(
+                new ListAttachedGroupPoliciesRequest { GroupName = groupName, Marker = marker },
+                cancellationToken),
+            response => response.AttachedPolicies?.Select(MapAttachedPolicy) ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private async Task<List<AttachedPolicyInfo>> ListAttachedRolePoliciesAsync(
+        string roleName,
+        CancellationToken cancellationToken) =>
+        await ListAttachedPoliciesAsync(
+            marker => _iamClient.ListAttachedRolePoliciesAsync(
+                new ListAttachedRolePoliciesRequest { RoleName = roleName, Marker = marker },
+                cancellationToken),
+            response => response.AttachedPolicies?.Select(MapAttachedPolicy) ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private static AttachedPolicyInfo MapAttachedPolicy(AttachedPolicyType policy) =>
+        new AttachedPolicyInfo(policy.PolicyArn, policy.PolicyName);
+
+    private static async Task<List<AttachedPolicyInfo>> ListAttachedPoliciesAsync<TResponse>(
+        Func<string?, Task<TResponse>> fetchPage,
+        Func<TResponse, IEnumerable<AttachedPolicyInfo>> getPolicies,
+        Func<TResponse, string?> getMarker,
+        CancellationToken cancellationToken)
+    {
+        List<AttachedPolicyInfo> policies = new();
+        string? marker = null;
+
+        do
+        {
+            TResponse response = await fetchPage(marker);
+            policies.AddRange(getPolicies(response));
+
+            marker = getMarker(response);
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return policies;
+    }
+
+    private async Task<List<Group>> ListGroupsAsync(CancellationToken cancellationToken)
+    {
+        List<Group> groups = new();
+        string? marker = null;
+
+        do
+        {
+            ListGroupsResponse response = await _iamClient.ListGroupsAsync(
+                new ListGroupsRequest { Marker = marker },
+                cancellationToken);
+
+            groups.AddRange(response.Groups ?? []);
+            marker = response.IsTruncated == true ? response.Marker : null;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return groups;
+    }
+
+    private async Task<List<Role>> ListRolesAsync(CancellationToken cancellationToken)
+    {
+        List<Role> roles = new();
+        string? marker = null;
+
+        do
+        {
+            ListRolesResponse response = await _iamClient.ListRolesAsync(
+                new ListRolesRequest { Marker = marker },
+                cancellationToken);
+
+            roles.AddRange(response.Roles ?? []);
+            marker = response.IsTruncated == true ? response.Marker : null;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return roles;
+    }
+
+    private async Task<List<Group>> ListGroupsForUserAsync(
+        string userName,
+        CancellationToken cancellationToken)
+    {
+        List<Group> groups = new();
+        string? marker = null;
+
+        do
+        {
+            ListGroupsForUserResponse response = await _iamClient.ListGroupsForUserAsync(
+                new ListGroupsForUserRequest { UserName = userName, Marker = marker },
+                cancellationToken);
+
+            groups.AddRange(response.Groups ?? []);
+            marker = response.IsTruncated == true ? response.Marker : null;
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return groups;
     }
 
     private async Task<string?> ResolveUserEmailAsync(

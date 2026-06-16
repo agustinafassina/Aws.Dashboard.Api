@@ -47,4 +47,26 @@ public class IamSecurityController : ControllerBase
             await _iamSecurityService.GetRiskyPoliciesAsync(cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("admin-privilege-grants")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAdminPrivilegeGrants(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetAdminPrivilegeGrants called");
+
+        Models.Dto.IamAdminPrivilegeGrantsResponseDto result =
+            await _iamSecurityService.GetAdminPrivilegeGrantsAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("cross-account-roles")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetCrossAccountRoles(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetCrossAccountRoles called");
+
+        Models.Dto.IamCrossAccountRolesResponseDto result =
+            await _iamSecurityService.GetCrossAccountRolesAsync(cancellationToken);
+        return Ok(result);
+    }
 }

@@ -58,4 +58,36 @@ public class IamSecurityService : IIamSecurityService
 
         return result;
     }
+
+    public async Task<IamAdminPrivilegeGrantsResponseDto> GetAdminPrivilegeGrantsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM admin privilege grants");
+        IamAdminPrivilegeGrantsResponseDto result =
+            await _iamRepository.GetAdminPrivilegeGrantsAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Admin privilege scan complete: {GrantCount} grants across {Users} users, {Groups} groups, {Roles} roles",
+            result.AdminPrivilegeGrantCount,
+            result.UsersWithAdminAccess,
+            result.GroupsWithAdminAccess,
+            result.RolesWithAdminAccess);
+
+        return result;
+    }
+
+    public async Task<IamCrossAccountRolesResponseDto> GetCrossAccountRolesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM roles for cross-account trust policies");
+        IamCrossAccountRolesResponseDto result =
+            await _iamRepository.GetCrossAccountRolesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Cross-account trust scan complete: {CrossAccountCount}/{TotalCount} roles flagged",
+            result.CrossAccountRolesCount,
+            result.TotalRolesScanned);
+
+        return result;
+    }
 }

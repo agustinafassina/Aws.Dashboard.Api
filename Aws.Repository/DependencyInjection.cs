@@ -18,6 +18,8 @@ namespace Aws.Repository
             services.AddScoped<ICostRepository, CostRepository>();
             services.AddScoped<IInspectorRepository, InspectorRepository>();
             services.AddScoped<IAuditRepository, AuditRepository>();
+            services.AddScoped<IElbRepository, ElbRepository>();
+            services.AddScoped<IEcrRepository, EcrRepository>();
             return services;
         }
     }

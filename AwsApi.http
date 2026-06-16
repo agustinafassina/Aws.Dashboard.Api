@@ -66,6 +66,36 @@ Accept: application/json
 
 ###
 
+### List IAM admin privilege grants (users, groups, roles)
+GET {{AwsApi_HostAddress}}/api/v1/iam/admin-privilege-grants
+Accept: application/json
+
+###
+
+### List IAM roles with cross-account or wildcard trust policies
+GET {{AwsApi_HostAddress}}/api/v1/iam/cross-account-roles
+Accept: application/json
+
+###
+
+### Security summary scorecard by region
+GET {{AwsApi_HostAddress}}/api/v1/security/summary?region=us-east-1&days=30
+Accept: application/json
+
+###
+
+### Internet-facing load balancers with public listener risks
+GET {{AwsApi_HostAddress}}/api/v1/elb/public-listeners?region=us-east-1
+Accept: application/json
+
+###
+
+### ECR repositories with public access or scan-on-push disabled
+GET {{AwsApi_HostAddress}}/api/v1/ecr/repository-risks?region=us-east-1
+Accept: application/json
+
+###
+
 ### Costs grouped by project tag (inclusive date range)
 GET {{AwsApi_HostAddress}}/api/v1/cost/by-project?startDate=2026-05-01&endDate=2026-05-31
 Accept: application/json

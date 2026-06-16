@@ -160,6 +160,26 @@ public class AuditRepository : IAuditRepository
             projectTagValue,
             matching,
             cancellationToken);
+        totalScanned += await ScanSesByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanDynamoDbByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanWafByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        totalScanned += await ScanCloudWatchByProjectTagAsync(
+            normalizedRegion,
+            projectTagValue,
+            matching,
+            cancellationToken);
 
         _logger.LogInformation(
             "Project tag search in {Region}: {MatchCount}/{TotalScanned} with {TagKey}={TagValue}",
@@ -1082,6 +1102,322 @@ public class AuditRepository : IAuditRepository
         }
 
         return topics.Count;
+    }
+
+    private async Task<int> ScanSesByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonSimpleEmailServiceV2 client = GetRegionalSesClient(region);
+        string accountId = await ResolveAccountIdAsync(cancellationToken);
+        List<Amazon.SimpleEmailV2.Model.IdentityInfo> identities = new();
+        string? nextToken = null;
+
+        do
+        {
+            Amazon.SimpleEmailV2.Model.ListEmailIdentitiesResponse response = await client.ListEmailIdentitiesAsync(
+                new Amazon.SimpleEmailV2.Model.ListEmailIdentitiesRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.EmailIdentities is not null)
+                identities.AddRange(response.EmailIdentities);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (Amazon.SimpleEmailV2.Model.IdentityInfo identity in identities)
+        {
+            if (string.IsNullOrWhiteSpace(identity.IdentityName))
+                continue;
+
+            string resourceArn = $"arn:aws:ses:{region}:{accountId}:identity/{identity.IdentityName}";
+
+            Amazon.SimpleEmailV2.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.SimpleEmailV2.Model.ListTagsForResourceRequest { ResourceArn = resourceArn },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(ToTagDictionary(tagsResponse.Tags), _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "SES",
+                ResourceId = identity.IdentityName,
+                Name = identity.IdentityName,
+                Region = region,
+                State = identity.VerificationStatus?.Value,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return identities.Count;
+    }
+
+    private async Task<int> ScanDynamoDbByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonDynamoDB client = GetRegionalDynamoDbClient(region);
+        string accountId = await ResolveAccountIdAsync(cancellationToken);
+        List<string> tableNames = new();
+        string? lastEvaluatedTableName = null;
+
+        do
+        {
+            ListTablesResponse response = await client.ListTablesAsync(
+                new ListTablesRequest { ExclusiveStartTableName = lastEvaluatedTableName },
+                cancellationToken);
+
+            if (response.TableNames is not null)
+                tableNames.AddRange(response.TableNames);
+
+            lastEvaluatedTableName = response.LastEvaluatedTableName;
+        }
+        while (!string.IsNullOrEmpty(lastEvaluatedTableName));
+
+        foreach (string tableName in tableNames)
+        {
+            string resourceArn = $"arn:aws:dynamodb:{region}:{accountId}:table/{tableName}";
+
+            ListTagsOfResourceResponse tagsResponse = await client.ListTagsOfResourceAsync(
+                new ListTagsOfResourceRequest { ResourceArn = resourceArn },
+                cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(ToTagDictionary(tagsResponse.Tags), _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "DynamoDB",
+                ResourceId = tableName,
+                Name = tableName,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return tableNames.Count;
+    }
+
+    private async Task<int> ScanWafByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonWAFV2 client = GetRegionalWafClient(region);
+        List<WebACLSummary> webAcls = new();
+        string? nextMarker = null;
+
+        do
+        {
+            ListWebACLsResponse response = await client.ListWebACLsAsync(
+                new ListWebACLsRequest
+                {
+                    Scope = Amazon.WAFV2.Scope.REGIONAL,
+                    Limit = 100,
+                    NextMarker = nextMarker
+                },
+                cancellationToken);
+
+            if (response.WebACLs is not null)
+                webAcls.AddRange(response.WebACLs);
+
+            nextMarker = response.NextMarker;
+        }
+        while (!string.IsNullOrEmpty(nextMarker));
+
+        foreach (WebACLSummary webAcl in webAcls)
+        {
+            if (string.IsNullOrWhiteSpace(webAcl.ARN))
+                continue;
+
+            Amazon.WAFV2.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.WAFV2.Model.ListTagsForResourceRequest { ResourceARN = webAcl.ARN },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(
+                ToTagDictionary(tagsResponse.TagInfoForResource?.TagList),
+                _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "WAF",
+                ResourceId = webAcl.ARN,
+                Name = webAcl.Name,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return webAcls.Count;
+    }
+
+    private async Task<int> ScanCloudWatchByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        int alarmCount = await ScanCloudWatchAlarmsByProjectTagAsync(
+            region,
+            projectTagValue,
+            matching,
+            cancellationToken);
+        int logGroupCount = await ScanCloudWatchLogGroupsByProjectTagAsync(
+            region,
+            projectTagValue,
+            matching,
+            cancellationToken);
+
+        return alarmCount + logGroupCount;
+    }
+
+    private async Task<int> ScanCloudWatchAlarmsByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonCloudWatch client = GetRegionalCloudWatchClient(region);
+        List<MetricAlarm> metricAlarms = new();
+        List<CompositeAlarm> compositeAlarms = new();
+        string? nextToken = null;
+
+        do
+        {
+            DescribeAlarmsResponse response = await client.DescribeAlarmsAsync(
+                new DescribeAlarmsRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.MetricAlarms is not null)
+                metricAlarms.AddRange(response.MetricAlarms);
+
+            if (response.CompositeAlarms is not null)
+                compositeAlarms.AddRange(response.CompositeAlarms);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (MetricAlarm alarm in metricAlarms)
+        {
+            if (string.IsNullOrWhiteSpace(alarm.AlarmArn))
+                continue;
+
+            Amazon.CloudWatch.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.CloudWatch.Model.ListTagsForResourceRequest { ResourceARN = alarm.AlarmArn },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(ToTagDictionary(tagsResponse.Tags), _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "CloudWatch",
+                ResourceId = alarm.AlarmArn,
+                Name = alarm.AlarmName,
+                Region = region,
+                State = alarm.StateValue?.Value,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        foreach (CompositeAlarm alarm in compositeAlarms)
+        {
+            if (string.IsNullOrWhiteSpace(alarm.AlarmArn))
+                continue;
+
+            Amazon.CloudWatch.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.CloudWatch.Model.ListTagsForResourceRequest { ResourceARN = alarm.AlarmArn },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(ToTagDictionary(tagsResponse.Tags), _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "CloudWatch",
+                ResourceId = alarm.AlarmArn,
+                Name = alarm.AlarmName,
+                Region = region,
+                State = alarm.StateValue?.Value,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return metricAlarms.Count + compositeAlarms.Count;
+    }
+
+    private async Task<int> ScanCloudWatchLogGroupsByProjectTagAsync(
+        string region,
+        string projectTagValue,
+        List<TaggedResourceDto> matching,
+        CancellationToken cancellationToken)
+    {
+        IAmazonCloudWatchLogs client = GetRegionalCloudWatchLogsClient(region);
+        List<LogGroup> logGroups = new();
+        string? nextToken = null;
+
+        do
+        {
+            DescribeLogGroupsResponse response = await client.DescribeLogGroupsAsync(
+                new DescribeLogGroupsRequest { NextToken = nextToken },
+                cancellationToken);
+
+            if (response.LogGroups is not null)
+                logGroups.AddRange(response.LogGroups);
+
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        foreach (LogGroup logGroup in logGroups)
+        {
+            if (string.IsNullOrWhiteSpace(logGroup.LogGroupArn))
+                continue;
+
+            Amazon.CloudWatchLogs.Model.ListTagsForResourceResponse tagsResponse =
+                await client.ListTagsForResourceAsync(
+                    new Amazon.CloudWatchLogs.Model.ListTagsForResourceRequest
+                    {
+                        ResourceArn = logGroup.LogGroupArn
+                    },
+                    cancellationToken);
+
+            string? tagValue = ResourceTagHelper.GetTagValue(tagsResponse.Tags, _requiredTagKey);
+            if (!ResourceTagHelper.MatchesTagValue(tagValue, projectTagValue))
+                continue;
+
+            matching.Add(new TaggedResourceDto
+            {
+                ResourceType = "CloudWatchLogs",
+                ResourceId = logGroup.LogGroupArn,
+                Name = logGroup.LogGroupName,
+                Region = region,
+                State = null,
+                ProjectTagValue = tagValue!.Trim()
+            });
+        }
+
+        return logGroups.Count;
     }
 
     private async Task<string> GetBucketRegionAsync(string bucketName, CancellationToken cancellationToken)
