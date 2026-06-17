@@ -54,8 +54,20 @@ Accept: application/json
 
 ###
 
+### List EC2 instances allowing IMDSv1 by region
+GET {{AwsApi_HostAddress}}/api/v1/ec2/imdsv1-instances?region=us-east-1
+Accept: application/json
+
+###
+
 ### List RDS instances with open inbound ports by region
 GET {{AwsApi_HostAddress}}/api/v1/rds/open-ports?region=us-east-1
+Accept: application/json
+
+###
+
+### List RDS instances without encryption at rest by region
+GET {{AwsApi_HostAddress}}/api/v1/rds/unencrypted-instances?region=us-east-1
 Accept: application/json
 
 ###
@@ -74,6 +86,18 @@ Accept: application/json
 
 ### List IAM roles with cross-account or wildcard trust policies
 GET {{AwsApi_HostAddress}}/api/v1/iam/cross-account-roles
+Accept: application/json
+
+###
+
+### Root account security status (MFA, access keys, signing certs)
+GET {{AwsApi_HostAddress}}/api/v1/iam/root-account-status
+Accept: application/json
+
+###
+
+### List IAM inline policies for users, groups and roles
+GET {{AwsApi_HostAddress}}/api/v1/iam/inline-policies
 Accept: application/json
 
 ###

@@ -65,4 +65,21 @@ public class Ec2SecurityController : ControllerBase
             await _ec2SecurityService.GetUnattachedVolumesByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("imdsv1-instances")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetImdsv1Instances(
+        [FromQuery] string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        _logger.LogInformation("GetImdsv1Instances called for region {Region}", region);
+
+        Models.Dto.Ec2Imdsv1InstancesResponseDto result =
+            await _ec2SecurityService.GetImdsv1InstancesByRegionAsync(region, cancellationToken);
+        return Ok(result);
+    }
 }

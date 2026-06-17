@@ -13,4 +13,10 @@ public interface IIamRepository
 
     Task<IamCrossAccountRolesResponseDto> GetCrossAccountRolesAsync(
         CancellationToken cancellationToken = default);
+
+    Task<IamRootAccountStatusResponseDto> GetRootAccountStatusAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<IamInlinePoliciesResponseDto> GetInlinePoliciesAsync(
+        CancellationToken cancellationToken = default);
 }

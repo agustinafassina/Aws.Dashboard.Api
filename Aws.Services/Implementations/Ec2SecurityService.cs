@@ -75,4 +75,24 @@ public class Ec2SecurityService : IEc2SecurityService
 
         return result;
     }
+
+    public async Task<Ec2Imdsv1InstancesResponseDto> GetImdsv1InstancesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning EC2 instances for IMDSv1 in region {Region}", region);
+        Ec2Imdsv1InstancesResponseDto result =
+            await _ec2Repository.GetImdsv1InstancesByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "IMDSv1 scan complete for region {Region}: {Imdsv1Count}/{TotalCount} instances allow IMDSv1",
+            result.Region,
+            result.Imdsv1InstancesCount,
+            result.TotalInstances);
+
+        return result;
+    }
 }

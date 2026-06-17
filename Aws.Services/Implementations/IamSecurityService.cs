@@ -90,4 +90,34 @@ public class IamSecurityService : IIamSecurityService
 
         return result;
     }
+
+    public async Task<IamRootAccountStatusResponseDto> GetRootAccountStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning root account security status");
+        IamRootAccountStatusResponseDto result =
+            await _iamRepository.GetRootAccountStatusAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Root account scan complete: compliant={IsCompliant}, risks={RiskCount}",
+            result.IsCompliant,
+            result.RiskReasons.Count);
+
+        return result;
+    }
+
+    public async Task<IamInlinePoliciesResponseDto> GetInlinePoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM inline policies");
+        IamInlinePoliciesResponseDto result =
+            await _iamRepository.GetInlinePoliciesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Inline policy scan complete: {RiskyCount}/{TotalCount} inline policies with wildcard admin risk",
+            result.RiskyInlinePolicyCount,
+            result.InlinePolicyCount);
+
+        return result;
+    }
 }

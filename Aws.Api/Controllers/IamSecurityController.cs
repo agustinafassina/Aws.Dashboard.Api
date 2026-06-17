@@ -69,4 +69,26 @@ public class IamSecurityController : ControllerBase
             await _iamSecurityService.GetCrossAccountRolesAsync(cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("root-account-status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRootAccountStatus(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetRootAccountStatus called");
+
+        Models.Dto.IamRootAccountStatusResponseDto result =
+            await _iamSecurityService.GetRootAccountStatusAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("inline-policies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetInlinePolicies(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetInlinePolicies called");
+
+        Models.Dto.IamInlinePoliciesResponseDto result =
+            await _iamSecurityService.GetInlinePoliciesAsync(cancellationToken);
+        return Ok(result);
+    }
 }

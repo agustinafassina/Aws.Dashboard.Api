@@ -7,4 +7,8 @@ public interface IRdsRepository
     Task<RdsOpenPortsResponseDto> GetInstancesWithOpenPortsByRegionAsync(
         string region,
         CancellationToken cancellationToken = default);
+
+    Task<RdsUnencryptedInstancesResponseDto> GetUnencryptedInstancesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default);
 }

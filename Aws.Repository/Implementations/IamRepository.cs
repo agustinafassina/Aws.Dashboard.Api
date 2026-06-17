@@ -402,6 +402,367 @@ public class IamRepository : IIamRepository
         };
     }
 
+    public async Task<IamInlinePoliciesResponseDto> GetInlinePoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        List<User> users = await ListUsersAsync(cancellationToken);
+        List<Group> groups = await ListGroupsAsync(cancellationToken);
+        List<Role> roles = await ListRolesAsync(cancellationToken);
+        List<IamInlinePolicyDto> inlinePolicies = new();
+
+        foreach (Role role in roles)
+        {
+            if (string.IsNullOrWhiteSpace(role.RoleName))
+                continue;
+
+            await CollectInlinePoliciesAsync(
+                inlinePolicies,
+                principalType: "Role",
+                principalName: role.RoleName,
+                principalArn: role.Arn,
+                listPolicyNames: () => ListInlineRolePolicyNamesAsync(role.RoleName, cancellationToken),
+                getPolicyDocument: policyName =>
+                    GetInlineRolePolicyDocumentAsync(role.RoleName, policyName, cancellationToken));
+        }
+
+        foreach (Group group in groups)
+        {
+            if (string.IsNullOrWhiteSpace(group.GroupName))
+                continue;
+
+            await CollectInlinePoliciesAsync(
+                inlinePolicies,
+                principalType: "Group",
+                principalName: group.GroupName,
+                principalArn: group.Arn,
+                listPolicyNames: () => ListInlineGroupPolicyNamesAsync(group.GroupName, cancellationToken),
+                getPolicyDocument: policyName =>
+                    GetInlineGroupPolicyDocumentAsync(group.GroupName, policyName, cancellationToken));
+        }
+
+        foreach (User user in users)
+        {
+            if (string.IsNullOrWhiteSpace(user.UserName))
+                continue;
+
+            await CollectInlinePoliciesAsync(
+                inlinePolicies,
+                principalType: "User",
+                principalName: user.UserName,
+                principalArn: user.Arn,
+                listPolicyNames: () => ListInlineUserPolicyNamesAsync(user.UserName, cancellationToken),
+                getPolicyDocument: policyName =>
+                    GetInlineUserPolicyDocumentAsync(user.UserName, policyName, cancellationToken));
+        }
+
+        List<IamInlinePolicyDto> orderedPolicies = inlinePolicies
+            .OrderByDescending(policy => policy.HasWildcardAdminRisk)
+            .ThenBy(policy => policy.PrincipalType, StringComparer.Ordinal)
+            .ThenBy(policy => policy.PrincipalName, StringComparer.Ordinal)
+            .ThenBy(policy => policy.PolicyName, StringComparer.Ordinal)
+            .ToList();
+
+        int riskyCount = orderedPolicies.Count(policy => policy.HasWildcardAdminRisk);
+
+        _logger.LogInformation(
+            "Found {InlineCount} inline policies ({RiskyCount} with wildcard admin risk) across {UserCount} users, {GroupCount} groups, {RoleCount} roles",
+            orderedPolicies.Count,
+            riskyCount,
+            users.Count,
+            groups.Count,
+            roles.Count);
+
+        return new IamInlinePoliciesResponseDto
+        {
+            TotalUsersScanned = users.Count,
+            TotalGroupsScanned = groups.Count,
+            TotalRolesScanned = roles.Count,
+            InlinePolicyCount = orderedPolicies.Count,
+            RiskyInlinePolicyCount = riskyCount,
+            Policies = orderedPolicies,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static async Task CollectInlinePoliciesAsync(
+        List<IamInlinePolicyDto> policies,
+        string principalType,
+        string principalName,
+        string? principalArn,
+        Func<Task<List<string>>> listPolicyNames,
+        Func<string, Task<string?>> getPolicyDocument)
+    {
+        List<string> policyNames = await listPolicyNames();
+
+        foreach (string policyName in policyNames)
+        {
+            if (string.IsNullOrWhiteSpace(policyName))
+                continue;
+
+            string? policyDocument = await getPolicyDocument(policyName);
+            bool hasWildcardAdminRisk = IamPolicyRiskAnalyzer.TryGetWildcardAdminRisk(
+                policyDocument ?? string.Empty,
+                out string riskReason);
+
+            policies.Add(new IamInlinePolicyDto
+            {
+                PrincipalType = principalType,
+                PrincipalName = principalName,
+                PrincipalArn = principalArn,
+                PolicyName = policyName,
+                HasWildcardAdminRisk = hasWildcardAdminRisk,
+                RiskReason = hasWildcardAdminRisk ? riskReason : null,
+                Recommendation = BuildInlinePolicyRecommendation(hasWildcardAdminRisk)
+            });
+        }
+    }
+
+    private static string BuildInlinePolicyRecommendation(bool hasWildcardAdminRisk) =>
+        hasWildcardAdminRisk
+            ? "Replace wildcard allow with least-privilege actions and resources, or migrate permissions to a managed policy."
+            : "Review inline policy permissions regularly. Prefer managed policies for reuse and auditability.";
+
+    private async Task<List<string>> ListInlineUserPolicyNamesAsync(
+        string userName,
+        CancellationToken cancellationToken) =>
+        await ListInlinePolicyNamesAsync(
+            marker => _iamClient.ListUserPoliciesAsync(
+                new ListUserPoliciesRequest { UserName = userName, Marker = marker },
+                cancellationToken),
+            response => response.PolicyNames ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private async Task<List<string>> ListInlineGroupPolicyNamesAsync(
+        string groupName,
+        CancellationToken cancellationToken) =>
+        await ListInlinePolicyNamesAsync(
+            marker => _iamClient.ListGroupPoliciesAsync(
+                new ListGroupPoliciesRequest { GroupName = groupName, Marker = marker },
+                cancellationToken),
+            response => response.PolicyNames ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private async Task<List<string>> ListInlineRolePolicyNamesAsync(
+        string roleName,
+        CancellationToken cancellationToken) =>
+        await ListInlinePolicyNamesAsync(
+            marker => _iamClient.ListRolePoliciesAsync(
+                new ListRolePoliciesRequest { RoleName = roleName, Marker = marker },
+                cancellationToken),
+            response => response.PolicyNames ?? [],
+            response => response.IsTruncated == true ? response.Marker : null,
+            cancellationToken);
+
+    private static async Task<List<string>> ListInlinePolicyNamesAsync<TResponse>(
+        Func<string?, Task<TResponse>> fetchPage,
+        Func<TResponse, IEnumerable<string>> getPolicyNames,
+        Func<TResponse, string?> getMarker,
+        CancellationToken cancellationToken)
+    {
+        List<string> policyNames = new();
+        string? marker = null;
+
+        do
+        {
+            TResponse response = await fetchPage(marker);
+            policyNames.AddRange(getPolicyNames(response));
+            marker = getMarker(response);
+        }
+        while (!string.IsNullOrEmpty(marker));
+
+        return policyNames;
+    }
+
+    private async Task<string?> GetInlineUserPolicyDocumentAsync(
+        string userName,
+        string policyName,
+        CancellationToken cancellationToken) =>
+        await GetInlinePolicyDocumentAsync(
+            () => _iamClient.GetUserPolicyAsync(
+                new GetUserPolicyRequest { UserName = userName, PolicyName = policyName },
+                cancellationToken),
+            response => response.PolicyDocument,
+            $"user {userName}",
+            policyName,
+            cancellationToken);
+
+    private async Task<string?> GetInlineGroupPolicyDocumentAsync(
+        string groupName,
+        string policyName,
+        CancellationToken cancellationToken) =>
+        await GetInlinePolicyDocumentAsync(
+            () => _iamClient.GetGroupPolicyAsync(
+                new GetGroupPolicyRequest { GroupName = groupName, PolicyName = policyName },
+                cancellationToken),
+            response => response.PolicyDocument,
+            $"group {groupName}",
+            policyName,
+            cancellationToken);
+
+    private async Task<string?> GetInlineRolePolicyDocumentAsync(
+        string roleName,
+        string policyName,
+        CancellationToken cancellationToken) =>
+        await GetInlinePolicyDocumentAsync(
+            () => _iamClient.GetRolePolicyAsync(
+                new GetRolePolicyRequest { RoleName = roleName, PolicyName = policyName },
+                cancellationToken),
+            response => response.PolicyDocument,
+            $"role {roleName}",
+            policyName,
+            cancellationToken);
+
+    private async Task<string?> GetInlinePolicyDocumentAsync<TResponse>(
+        Func<Task<TResponse>> fetchPolicy,
+        Func<TResponse, string?> getDocument,
+        string principalDescription,
+        string policyName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            TResponse response = await fetchPolicy();
+            return IamPolicyRiskAnalyzer.DecodePolicyDocument(getDocument(response));
+        }
+        catch (AmazonIdentityManagementServiceException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not read inline policy {PolicyName} for {PrincipalDescription}",
+                policyName,
+                principalDescription);
+            return null;
+        }
+    }
+
+    public async Task<IamRootAccountStatusResponseDto> GetRootAccountStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        string accountId = await ResolveAccountIdAsync(cancellationToken);
+
+        GetAccountSummaryResponse summaryResponse = await _iamClient.GetAccountSummaryAsync(cancellationToken);
+        IReadOnlyDictionary<string, int> summary = summaryResponse.SummaryMap ?? new Dictionary<string, int>();
+
+        bool mfaEnabled = GetSummaryFlag(summary, "AccountMFAEnabled");
+        bool hasActiveAccessKeys = GetSummaryFlag(summary, "AccountAccessKeysPresent");
+        bool hasSigningCertificate = GetSummaryFlag(summary, "AccountSigningCertificatesPresent");
+
+        bool passwordEnabled = false;
+        bool accessKey1Active = hasActiveAccessKeys;
+        bool accessKey2Active = false;
+        DateTime? passwordLastUsed = null;
+        DateTime? accessKey1LastUsed = null;
+        DateTime? accessKey2LastUsed = null;
+        bool credentialReportAvailable = false;
+
+        if (await TryGetRootCredentialDetailsAsync(cancellationToken) is IamCredentialReportParser.RootAccountCredentialDetails details)
+        {
+            credentialReportAvailable = true;
+            mfaEnabled = details.MfaActive;
+            passwordEnabled = details.PasswordEnabled;
+            accessKey1Active = details.AccessKey1Active;
+            accessKey2Active = details.AccessKey2Active;
+            hasActiveAccessKeys = details.AccessKey1Active || details.AccessKey2Active;
+            hasSigningCertificate = details.Cert1Active || details.Cert2Active;
+            passwordLastUsed = details.PasswordLastUsed;
+            accessKey1LastUsed = details.AccessKey1LastUsed;
+            accessKey2LastUsed = details.AccessKey2LastUsed;
+        }
+
+        IReadOnlyList<string> riskReasons = IamCredentialReportParser.BuildRiskReasons(
+            mfaEnabled,
+            hasActiveAccessKeys,
+            hasSigningCertificate);
+
+        _logger.LogInformation(
+            "Root account status for {AccountId}: MFA={MfaEnabled}, accessKeys={HasAccessKeys}, risks={RiskCount}",
+            accountId,
+            mfaEnabled,
+            hasActiveAccessKeys,
+            riskReasons.Count);
+
+        return new IamRootAccountStatusResponseDto
+        {
+            AccountId = accountId,
+            MfaEnabled = mfaEnabled,
+            HasActiveAccessKeys = hasActiveAccessKeys,
+            HasSigningCertificate = hasSigningCertificate,
+            PasswordEnabled = passwordEnabled,
+            AccessKey1Active = accessKey1Active,
+            AccessKey2Active = accessKey2Active,
+            PasswordLastUsed = passwordLastUsed,
+            AccessKey1LastUsed = accessKey1LastUsed,
+            AccessKey2LastUsed = accessKey2LastUsed,
+            CredentialReportAvailable = credentialReportAvailable,
+            IsCompliant = riskReasons.Count == 0,
+            RiskReasons = riskReasons,
+            Recommendation = IamCredentialReportParser.BuildRecommendation(riskReasons),
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static bool GetSummaryFlag(IReadOnlyDictionary<string, int> summary, string key) =>
+        summary.TryGetValue(key, out int value) && value == 1;
+
+    private async Task<IamCredentialReportParser.RootAccountCredentialDetails?> TryGetRootCredentialDetailsAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _iamClient.GenerateCredentialReportAsync(new GenerateCredentialReportRequest(), cancellationToken);
+        }
+        catch (AmazonIdentityManagementServiceException ex)
+        {
+            _logger.LogDebug(ex, "GenerateCredentialReport returned an expected error; continuing to poll report");
+        }
+
+        const int maxAttempts = 20;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            try
+            {
+                GetCredentialReportResponse reportResponse =
+                    await _iamClient.GetCredentialReportAsync(cancellationToken);
+
+                byte[]? content = await ReadReportContentAsync(reportResponse.Content, cancellationToken);
+                if (IamCredentialReportParser.TryParseRootAccountDetails(
+                        content,
+                        out IamCredentialReportParser.RootAccountCredentialDetails details))
+                {
+                    return details;
+                }
+
+                return null;
+            }
+            catch (AmazonIdentityManagementServiceException ex) when (IsCredentialReportPending(ex))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(1500), cancellationToken);
+            }
+        }
+
+        _logger.LogWarning("Timed out waiting for IAM credential report");
+        return null;
+    }
+
+    private static bool IsCredentialReportPending(AmazonIdentityManagementServiceException exception) =>
+        string.Equals(exception.ErrorCode, "ReportInProgress", StringComparison.Ordinal) ||
+        string.Equals(exception.ErrorCode, "ReportNotPresent", StringComparison.Ordinal);
+
+    private static async Task<byte[]?> ReadReportContentAsync(
+        Stream? content,
+        CancellationToken cancellationToken)
+    {
+        if (content is null)
+            return null;
+
+        using MemoryStream memoryStream = new();
+        await content.CopyToAsync(memoryStream, cancellationToken);
+        return memoryStream.ToArray();
+    }
+
     private async Task<string> ResolveAccountIdAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_accountId))

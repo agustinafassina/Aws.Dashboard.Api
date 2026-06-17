@@ -34,4 +34,24 @@ public class RdsSecurityService : IRdsSecurityService
 
         return result;
     }
+
+    public async Task<RdsUnencryptedInstancesResponseDto> GetUnencryptedInstancesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning RDS instances for encryption at rest in region {Region}", region);
+        RdsUnencryptedInstancesResponseDto result =
+            await _rdsRepository.GetUnencryptedInstancesByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "RDS encryption scan complete for region {Region}: {UnencryptedCount}/{TotalCount} instances without encryption",
+            result.Region,
+            result.UnencryptedInstancesCount,
+            result.TotalInstances);
+
+        return result;
+    }
 }

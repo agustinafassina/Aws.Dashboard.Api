@@ -11,6 +11,8 @@ public class SecuritySummaryResponseDto
     public int UnusedSecurityGroups { get; init; }
     public int UnattachedVolumes { get; init; }
     public int RdsInstancesWithOpenPorts { get; init; }
+    public int UnencryptedRdsInstances { get; init; }
+    public int Imdsv1Instances { get; init; }
     public int PublicLambdaFunctions { get; init; }
     public int PublicLoadBalancers { get; init; }
     public int EcrRepositoriesAtRisk { get; init; }
@@ -24,5 +26,7 @@ public class SecuritySummaryResponseDto
     public int RiskyPolicies { get; init; }
     public int AdminPrivilegeGrants { get; init; }
     public int CrossAccountRoles { get; init; }
+    public int RootAccountRiskCount { get; init; }
+    public int RiskyInlinePolicies { get; init; }
     public DateTime ScannedAt { get; init; }
 }

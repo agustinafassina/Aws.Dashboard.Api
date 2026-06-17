@@ -124,6 +124,85 @@ public class Ec2Repository : IEc2Repository
         };
     }
 
+    public async Task<Ec2Imdsv1InstancesResponseDto> GetImdsv1InstancesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        IAmazonEC2 client = GetRegionalClient(normalizedRegion);
+
+        List<Instance> instances = await ListInstancesAsync(client, cancellationToken);
+        List<Ec2Imdsv1InstanceDto> imdsv1Instances = instances
+            .Where(IsRelevantInstanceState)
+            .Where(AllowsImdsv1)
+            .Select(MapImdsv1Instance)
+            .OrderBy(instance => instance.InstanceId, StringComparer.Ordinal)
+            .ToList();
+
+        int relevantInstanceCount = instances.Count(IsRelevantInstanceState);
+
+        _logger.LogInformation(
+            "Found {Imdsv1Count}/{TotalCount} EC2 instances allowing IMDSv1 in region {Region}",
+            imdsv1Instances.Count,
+            relevantInstanceCount,
+            normalizedRegion);
+
+        return new Ec2Imdsv1InstancesResponseDto
+        {
+            Region = normalizedRegion,
+            TotalInstances = relevantInstanceCount,
+            Imdsv1InstancesCount = imdsv1Instances.Count,
+            Instances = imdsv1Instances,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static bool IsRelevantInstanceState(Instance instance)
+    {
+        string? state = instance.State?.Name?.Value;
+        return !string.Equals(state, "terminated", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(state, "shutting-down", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool AllowsImdsv1(Instance instance)
+    {
+        InstanceMetadataOptionsResponse? metadataOptions = instance.MetadataOptions;
+        if (metadataOptions is null)
+            return true;
+
+        string? httpEndpoint = metadataOptions.HttpEndpoint?.Value;
+        if (string.Equals(httpEndpoint, "disabled", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string? httpTokens = metadataOptions.HttpTokens?.Value;
+        return !string.Equals(httpTokens, "required", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Ec2Imdsv1InstanceDto MapImdsv1Instance(Instance instance)
+    {
+        string? httpTokens = instance.MetadataOptions?.HttpTokens?.Value;
+        string? httpEndpoint = instance.MetadataOptions?.HttpEndpoint?.Value;
+
+        return new Ec2Imdsv1InstanceDto
+        {
+            InstanceId = instance.InstanceId,
+            Name = instance.Tags?
+                .FirstOrDefault(tag => string.Equals(tag.Key, "Name", StringComparison.OrdinalIgnoreCase))
+                ?.Value,
+            State = instance.State?.Name?.Value,
+            InstanceType = instance.InstanceType?.Value,
+            HttpTokens = string.IsNullOrWhiteSpace(httpTokens) ? "optional" : httpTokens,
+            HttpEndpoint = string.IsNullOrWhiteSpace(httpEndpoint) ? "enabled" : httpEndpoint,
+            Recommendation = BuildImdsv1Recommendation(httpTokens)
+        };
+    }
+
+    private static string BuildImdsv1Recommendation(string? httpTokens) =>
+        string.Equals(httpTokens, "optional", StringComparison.OrdinalIgnoreCase) ||
+        string.IsNullOrWhiteSpace(httpTokens)
+            ? "Require IMDSv2 by setting HttpTokens to required. This reduces SSRF and metadata credential theft risk."
+            : "Review instance metadata options and enforce IMDSv2 unless a legacy integration requires IMDSv1.";
+
     private static async Task<List<Volume>> ListAllVolumesAsync(
         IAmazonEC2 client,
         CancellationToken cancellationToken)

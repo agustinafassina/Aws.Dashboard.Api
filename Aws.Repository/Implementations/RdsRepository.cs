@@ -73,6 +73,61 @@ public class RdsRepository : IRdsRepository
         };
     }
 
+    public async Task<RdsUnencryptedInstancesResponseDto> GetUnencryptedInstancesByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        IAmazonRDS rdsClient = GetRegionalRdsClient(normalizedRegion);
+
+        List<DBInstance> instances = await ListDbInstancesAsync(rdsClient, cancellationToken);
+        List<RdsUnencryptedInstanceDto> unencryptedInstances = instances
+            .Where(instance => instance.StorageEncrypted != true)
+            .Select(MapUnencryptedInstance)
+            .OrderBy(instance => instance.DbInstanceIdentifier, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {UnencryptedCount}/{TotalCount} unencrypted RDS instances in region {Region}",
+            unencryptedInstances.Count,
+            instances.Count,
+            normalizedRegion);
+
+        return new RdsUnencryptedInstancesResponseDto
+        {
+            Region = normalizedRegion,
+            TotalInstances = instances.Count,
+            UnencryptedInstancesCount = unencryptedInstances.Count,
+            Instances = unencryptedInstances,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static RdsUnencryptedInstanceDto MapUnencryptedInstance(DBInstance instance) =>
+        new()
+        {
+            DbInstanceIdentifier = instance.DBInstanceIdentifier ?? "unknown",
+            Engine = instance.Engine ?? "unknown",
+            EngineVersion = instance.EngineVersion,
+            Status = instance.DBInstanceStatus,
+            StorageType = instance.StorageType,
+            AllocatedStorageGiB = instance.AllocatedStorage,
+            StorageEncrypted = instance.StorageEncrypted == true,
+            KmsKeyId = instance.KmsKeyId,
+            Recommendation = BuildUnencryptedRecommendation(instance.Engine)
+        };
+
+    private static string BuildUnencryptedRecommendation(string? engine)
+    {
+        if (string.Equals(engine, "aurora-mysql", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(engine, "aurora-postgresql", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Enable encryption at rest on the Aurora cluster. Existing unencrypted clusters require snapshot restore into an encrypted cluster.";
+        }
+
+        return "Enable storage encryption at rest for this DB instance. For existing databases, create an encrypted snapshot and restore to a new encrypted instance.";
+    }
+
     private async Task<List<DBInstance>> ListDbInstancesAsync(
         IAmazonRDS client,
         CancellationToken cancellationToken)

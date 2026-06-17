@@ -76,8 +76,12 @@ public class SecuritySummaryService : ISecuritySummaryService
             _ec2SecurityService.GetUnusedSecurityGroupsByRegionAsync(region, cancellationToken);
         Task<Ec2UnattachedVolumesResponseDto> unattachedVolumesTask =
             _ec2SecurityService.GetUnattachedVolumesByRegionAsync(region, cancellationToken);
+        Task<Ec2Imdsv1InstancesResponseDto> imdsv1InstancesTask =
+            _ec2SecurityService.GetImdsv1InstancesByRegionAsync(region, cancellationToken);
         Task<RdsOpenPortsResponseDto> rdsOpenPortsTask =
             _rdsSecurityService.GetInstancesWithOpenPortsByRegionAsync(region, cancellationToken);
+        Task<RdsUnencryptedInstancesResponseDto> unencryptedRdsTask =
+            _rdsSecurityService.GetUnencryptedInstancesByRegionAsync(region, cancellationToken);
         Task<LambdaPublicFunctionsResponseDto> lambdaTask =
             _lambdaSecurityService.GetPublicFunctionsByRegionAsync(region, cancellationToken);
         Task<ElbPublicListenersResponseDto> elbTask =
@@ -109,6 +113,10 @@ public class SecuritySummaryService : ISecuritySummaryService
             _iamSecurityService.GetAdminPrivilegeGrantsAsync(cancellationToken);
         Task<IamCrossAccountRolesResponseDto> crossAccountRolesTask =
             _iamSecurityService.GetCrossAccountRolesAsync(cancellationToken);
+        Task<IamRootAccountStatusResponseDto> rootAccountTask =
+            _iamSecurityService.GetRootAccountStatusAsync(cancellationToken);
+        Task<IamInlinePoliciesResponseDto> inlinePoliciesTask =
+            _iamSecurityService.GetInlinePoliciesAsync(cancellationToken);
 
         await Task.WhenAll(
             publicBucketsTask,
@@ -116,7 +124,9 @@ public class SecuritySummaryService : ISecuritySummaryService
             ec2OpenPortsTask,
             unusedSecurityGroupsTask,
             unattachedVolumesTask,
+            imdsv1InstancesTask,
             rdsOpenPortsTask,
+            unencryptedRdsTask,
             lambdaTask,
             elbTask,
             ecrTask,
@@ -127,14 +137,18 @@ public class SecuritySummaryService : ISecuritySummaryService
             usersWithoutMfaTask,
             riskyPoliciesTask,
             adminGrantsTask,
-            crossAccountRolesTask);
+            crossAccountRolesTask,
+            rootAccountTask,
+            inlinePoliciesTask);
 
         S3PublicBucketsResponseDto publicBuckets = await publicBucketsTask;
         S3EncryptionStatusResponseDto encryption = await encryptionTask;
         Ec2OpenPortsResponseDto ec2OpenPorts = await ec2OpenPortsTask;
         Ec2UnusedSecurityGroupsResponseDto unusedSecurityGroups = await unusedSecurityGroupsTask;
         Ec2UnattachedVolumesResponseDto unattachedVolumes = await unattachedVolumesTask;
+        Ec2Imdsv1InstancesResponseDto imdsv1Instances = await imdsv1InstancesTask;
         RdsOpenPortsResponseDto rdsOpenPorts = await rdsOpenPortsTask;
+        RdsUnencryptedInstancesResponseDto unencryptedRds = await unencryptedRdsTask;
         LambdaPublicFunctionsResponseDto lambda = await lambdaTask;
         ElbPublicListenersResponseDto elb = await elbTask;
         EcrRepositoryRisksResponseDto ecr = await ecrTask;
@@ -146,6 +160,8 @@ public class SecuritySummaryService : ISecuritySummaryService
         IamRiskyPoliciesResponseDto riskyPolicies = await riskyPoliciesTask;
         IamAdminPrivilegeGrantsResponseDto adminGrants = await adminGrantsTask;
         IamCrossAccountRolesResponseDto crossAccountRoles = await crossAccountRolesTask;
+        IamRootAccountStatusResponseDto rootAccount = await rootAccountTask;
+        IamInlinePoliciesResponseDto inlinePolicies = await inlinePoliciesTask;
 
         int totalFindings =
             publicBuckets.PublicBucketsCount +
@@ -154,6 +170,8 @@ public class SecuritySummaryService : ISecuritySummaryService
             unusedSecurityGroups.UnusedSecurityGroupsCount +
             unattachedVolumes.UnattachedVolumesCount +
             rdsOpenPorts.InstancesWithPublicPorts +
+            unencryptedRds.UnencryptedInstancesCount +
+            imdsv1Instances.Imdsv1InstancesCount +
             lambda.PublicFunctionsCount +
             elb.PublicLoadBalancersCount +
             ecr.RepositoriesAtRiskCount +
@@ -166,7 +184,9 @@ public class SecuritySummaryService : ISecuritySummaryService
             usersWithoutMfa.UsersWithoutMfa +
             riskyPolicies.RiskyPolicyCount +
             adminGrants.AdminPrivilegeGrantCount +
-            crossAccountRoles.CrossAccountRolesCount;
+            crossAccountRoles.CrossAccountRolesCount +
+            rootAccount.RiskReasons.Count +
+            inlinePolicies.RiskyInlinePolicyCount;
 
         SecuritySummaryResponseDto summary = new()
         {
@@ -179,6 +199,8 @@ public class SecuritySummaryService : ISecuritySummaryService
             UnusedSecurityGroups = unusedSecurityGroups.UnusedSecurityGroupsCount,
             UnattachedVolumes = unattachedVolumes.UnattachedVolumesCount,
             RdsInstancesWithOpenPorts = rdsOpenPorts.InstancesWithPublicPorts,
+            UnencryptedRdsInstances = unencryptedRds.UnencryptedInstancesCount,
+            Imdsv1Instances = imdsv1Instances.Imdsv1InstancesCount,
             PublicLambdaFunctions = lambda.PublicFunctionsCount,
             PublicLoadBalancers = elb.PublicLoadBalancersCount,
             EcrRepositoriesAtRisk = ecr.RepositoriesAtRiskCount,
@@ -192,6 +214,8 @@ public class SecuritySummaryService : ISecuritySummaryService
             RiskyPolicies = riskyPolicies.RiskyPolicyCount,
             AdminPrivilegeGrants = adminGrants.AdminPrivilegeGrantCount,
             CrossAccountRoles = crossAccountRoles.CrossAccountRolesCount,
+            RootAccountRiskCount = rootAccount.RiskReasons.Count,
+            RiskyInlinePolicies = inlinePolicies.RiskyInlinePolicyCount,
             ScannedAt = DateTime.UtcNow
         };
 
