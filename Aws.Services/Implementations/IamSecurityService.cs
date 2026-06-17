@@ -120,4 +120,22 @@ public class IamSecurityService : IIamSecurityService
 
         return result;
     }
+
+    public async Task<IamOverprivilegedPoliciesResponseDto> GetOverprivilegedCustomPoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Scanning IAM customer policies for overprivileged permissions");
+        IamOverprivilegedPoliciesResponseDto result =
+            await _iamRepository.GetOverprivilegedCustomPoliciesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Overprivileged policy scan complete: {OverprivilegedCount}/{TotalCount} policies flagged ({CriticalCount} critical, {HighCount} high, {MediumCount} medium)",
+            result.OverprivilegedPolicyCount,
+            result.TotalCustomerPoliciesScanned,
+            result.CriticalPolicyCount,
+            result.HighPolicyCount,
+            result.MediumPolicyCount);
+
+        return result;
+    }
 }

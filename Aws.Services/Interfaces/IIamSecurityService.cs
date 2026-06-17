@@ -19,4 +19,7 @@ public interface IIamSecurityService
 
     Task<IamInlinePoliciesResponseDto> GetInlinePoliciesAsync(
         CancellationToken cancellationToken = default);
+
+    Task<IamOverprivilegedPoliciesResponseDto> GetOverprivilegedCustomPoliciesAsync(
+        CancellationToken cancellationToken = default);
 }

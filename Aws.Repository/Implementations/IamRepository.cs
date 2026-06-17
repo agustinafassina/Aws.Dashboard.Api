@@ -241,6 +241,98 @@ public class IamRepository : IIamRepository
         };
     }
 
+    public async Task<IamOverprivilegedPoliciesResponseDto> GetOverprivilegedCustomPoliciesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        List<ManagedPolicy> policies = await ListCustomerManagedPoliciesAsync(cancellationToken);
+        List<IamOverprivilegedPolicyDto> overprivilegedPolicies = new();
+
+        foreach (ManagedPolicy policy in policies)
+        {
+            if (string.IsNullOrWhiteSpace(policy.Arn) || string.IsNullOrWhiteSpace(policy.PolicyName))
+                continue;
+
+            IamOverprivilegedPolicyDto? overprivilegedPolicy =
+                await TryMapOverprivilegedPolicyAsync(policy.Arn, policy.PolicyName, cancellationToken);
+
+            if (overprivilegedPolicy is not null)
+                overprivilegedPolicies.Add(overprivilegedPolicy);
+        }
+
+        List<IamOverprivilegedPolicyDto> orderedPolicies = overprivilegedPolicies
+            .OrderBy(policy => GetPrivilegeRank(policy.PrivilegeLevel))
+            .ThenBy(policy => policy.PolicyName, StringComparer.Ordinal)
+            .ToList();
+
+        _logger.LogInformation(
+            "Found {OverprivilegedCount}/{TotalCount} overprivileged customer policies ({CriticalCount} critical, {HighCount} high, {MediumCount} medium)",
+            orderedPolicies.Count,
+            policies.Count,
+            orderedPolicies.Count(policy => string.Equals(policy.PrivilegeLevel, "Critical", StringComparison.OrdinalIgnoreCase)),
+            orderedPolicies.Count(policy => string.Equals(policy.PrivilegeLevel, "High", StringComparison.OrdinalIgnoreCase)),
+            orderedPolicies.Count(policy => string.Equals(policy.PrivilegeLevel, "Medium", StringComparison.OrdinalIgnoreCase)));
+
+        return new IamOverprivilegedPoliciesResponseDto
+        {
+            TotalCustomerPoliciesScanned = policies.Count,
+            OverprivilegedPolicyCount = orderedPolicies.Count,
+            CriticalPolicyCount = orderedPolicies.Count(policy =>
+                string.Equals(policy.PrivilegeLevel, "Critical", StringComparison.OrdinalIgnoreCase)),
+            HighPolicyCount = orderedPolicies.Count(policy =>
+                string.Equals(policy.PrivilegeLevel, "High", StringComparison.OrdinalIgnoreCase)),
+            MediumPolicyCount = orderedPolicies.Count(policy =>
+                string.Equals(policy.PrivilegeLevel, "Medium", StringComparison.OrdinalIgnoreCase)),
+            Policies = orderedPolicies,
+            ScannedAt = DateTime.UtcNow,
+        };
+    }
+
+    private async Task<IamOverprivilegedPolicyDto?> TryMapOverprivilegedPolicyAsync(
+        string policyArn,
+        string policyName,
+        CancellationToken cancellationToken)
+    {
+        string? policyDocument = await TryGetPolicyDocumentAsync(policyArn, cancellationToken);
+        if (string.IsNullOrWhiteSpace(policyDocument))
+            return null;
+
+        IReadOnlyList<IamOverprivilegedPolicyAnalyzer.OverprivilegedFinding> findings =
+            IamOverprivilegedPolicyAnalyzer.Analyze(policyDocument);
+
+        IamOverprivilegedPolicyAnalyzer.OverprivilegedFinding? worstFinding =
+            IamOverprivilegedPolicyAnalyzer.GetWorstFinding(findings);
+
+        if (worstFinding is null)
+            return null;
+
+        IReadOnlyList<string> riskyActions = findings
+            .SelectMany(finding => finding.RiskyActions)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(action => action, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new IamOverprivilegedPolicyDto
+        {
+            PolicyArn = policyArn,
+            PolicyName = policyName,
+            PrivilegeLevel = worstFinding.PrivilegeLevel,
+            RiskReason = string.Join("; ", findings.Select(finding => finding.RiskReason).Distinct()),
+            RiskyActions = riskyActions,
+            Recommendation = IamOverprivilegedPolicyAnalyzer.BuildRecommendation(
+                worstFinding.PrivilegeLevel,
+                riskyActions),
+        };
+    }
+
+    private static int GetPrivilegeRank(string privilegeLevel) =>
+        privilegeLevel switch
+        {
+            "Critical" => 0,
+            "High" => 1,
+            "Medium" => 2,
+            _ => 3,
+        };
+
     public async Task<IamAdminPrivilegeGrantsResponseDto> GetAdminPrivilegeGrantsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -1007,6 +1099,19 @@ public class IamRepository : IIamRepository
         string policyArn,
         CancellationToken cancellationToken)
     {
+        string? document = await TryGetPolicyDocumentAsync(policyArn, cancellationToken);
+        if (string.IsNullOrWhiteSpace(document))
+            return null;
+
+        return IamPolicyRiskAnalyzer.TryGetWildcardAdminRisk(document, out string riskReason)
+            ? riskReason
+            : null;
+    }
+
+    private async Task<string?> TryGetPolicyDocumentAsync(
+        string policyArn,
+        CancellationToken cancellationToken)
+    {
         try
         {
             GetPolicyResponse policy = await _iamClient.GetPolicyAsync(
@@ -1024,11 +1129,7 @@ public class IamRepository : IIamRepository
                 },
                 cancellationToken);
 
-            string document = IamPolicyRiskAnalyzer.DecodePolicyDocument(version.PolicyVersion?.Document);
-
-            return IamPolicyRiskAnalyzer.TryGetWildcardAdminRisk(document, out string riskReason)
-                ? riskReason
-                : null;
+            return IamPolicyRiskAnalyzer.DecodePolicyDocument(version.PolicyVersion?.Document);
         }
         catch (AmazonIdentityManagementServiceException ex)
         {

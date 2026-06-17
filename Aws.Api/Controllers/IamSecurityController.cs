@@ -91,4 +91,15 @@ public class IamSecurityController : ControllerBase
             await _iamSecurityService.GetInlinePoliciesAsync(cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("overprivileged-custom-policies")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetOverprivilegedCustomPolicies(CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("GetOverprivilegedCustomPolicies called");
+
+        Models.Dto.IamOverprivilegedPoliciesResponseDto result =
+            await _iamSecurityService.GetOverprivilegedCustomPoliciesAsync(cancellationToken);
+        return Ok(result);
+    }
 }
