@@ -108,6 +108,12 @@ Accept: application/json
 
 ###
 
+### List IAM customer policies with overprivileged permissions
+GET {{AwsApi_HostAddress}}/api/v1/iam/overprivileged-custom-policies
+Accept: application/json
+
+###
+
 ### Security summary scorecard by region
 GET {{AwsApi_HostAddress}}/api/v1/security/summary?region=us-east-1&days=30
 Accept: application/json
