@@ -72,6 +72,12 @@ Accept: application/json
 
 ###
 
+### List RDS instances without adequate automated backups by region
+GET {{AwsApi_HostAddress}}/api/v1/rds/no-backups?region=us-east-1
+Accept: application/json
+
+###
+
 ### List IAM access keys
 GET {{AwsApi_HostAddress}}/api/v1/iam/access-keys
 Accept: application/json

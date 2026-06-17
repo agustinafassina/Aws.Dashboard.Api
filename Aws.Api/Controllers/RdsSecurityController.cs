@@ -48,4 +48,21 @@ public class RdsSecurityController : ControllerBase
             await _rdsSecurityService.GetUnencryptedInstancesByRegionAsync(region, cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("no-backups")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetInstancesWithoutAdequateBackups(
+        [FromQuery] string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            return BadRequest(new { error = "Query parameter 'region' is required (e.g. us-east-1)." });
+
+        _logger.LogInformation("GetInstancesWithoutAdequateBackups called for region {Region}", region);
+
+        Models.Dto.RdsNoBackupsResponseDto result =
+            await _rdsSecurityService.GetInstancesWithoutAdequateBackupsByRegionAsync(region, cancellationToken);
+        return Ok(result);
+    }
 }

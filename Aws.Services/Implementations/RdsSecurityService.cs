@@ -54,4 +54,24 @@ public class RdsSecurityService : IRdsSecurityService
 
         return result;
     }
+
+    public async Task<RdsNoBackupsResponseDto> GetInstancesWithoutAdequateBackupsByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(region))
+            throw new ArgumentException("Region is required.", nameof(region));
+
+        _logger.LogInformation("Scanning RDS instances for backup coverage in region {Region}", region);
+        RdsNoBackupsResponseDto result =
+            await _rdsRepository.GetInstancesWithoutAdequateBackupsByRegionAsync(region, cancellationToken);
+
+        _logger.LogInformation(
+            "RDS backup scan complete for region {Region}: {AtRiskCount}/{TotalCount} instances below minimum retention",
+            result.Region,
+            result.InstancesWithoutAdequateBackupsCount,
+            result.TotalInstances);
+
+        return result;
+    }
 }

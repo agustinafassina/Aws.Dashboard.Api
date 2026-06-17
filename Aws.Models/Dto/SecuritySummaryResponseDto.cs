@@ -12,6 +12,7 @@ public class SecuritySummaryResponseDto
     public int UnattachedVolumes { get; init; }
     public int RdsInstancesWithOpenPorts { get; init; }
     public int UnencryptedRdsInstances { get; init; }
+    public int RdsInstancesWithoutAdequateBackups { get; init; }
     public int Imdsv1Instances { get; init; }
     public int PublicLambdaFunctions { get; init; }
     public int PublicLoadBalancers { get; init; }

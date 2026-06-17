@@ -82,6 +82,8 @@ public class SecuritySummaryService : ISecuritySummaryService
             _rdsSecurityService.GetInstancesWithOpenPortsByRegionAsync(region, cancellationToken);
         Task<RdsUnencryptedInstancesResponseDto> unencryptedRdsTask =
             _rdsSecurityService.GetUnencryptedInstancesByRegionAsync(region, cancellationToken);
+        Task<RdsNoBackupsResponseDto> rdsNoBackupsTask =
+            _rdsSecurityService.GetInstancesWithoutAdequateBackupsByRegionAsync(region, cancellationToken);
         Task<LambdaPublicFunctionsResponseDto> lambdaTask =
             _lambdaSecurityService.GetPublicFunctionsByRegionAsync(region, cancellationToken);
         Task<ElbPublicListenersResponseDto> elbTask =
@@ -127,6 +129,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             imdsv1InstancesTask,
             rdsOpenPortsTask,
             unencryptedRdsTask,
+            rdsNoBackupsTask,
             lambdaTask,
             elbTask,
             ecrTask,
@@ -149,6 +152,7 @@ public class SecuritySummaryService : ISecuritySummaryService
         Ec2Imdsv1InstancesResponseDto imdsv1Instances = await imdsv1InstancesTask;
         RdsOpenPortsResponseDto rdsOpenPorts = await rdsOpenPortsTask;
         RdsUnencryptedInstancesResponseDto unencryptedRds = await unencryptedRdsTask;
+        RdsNoBackupsResponseDto rdsNoBackups = await rdsNoBackupsTask;
         LambdaPublicFunctionsResponseDto lambda = await lambdaTask;
         ElbPublicListenersResponseDto elb = await elbTask;
         EcrRepositoryRisksResponseDto ecr = await ecrTask;
@@ -171,6 +175,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             unattachedVolumes.UnattachedVolumesCount +
             rdsOpenPorts.InstancesWithPublicPorts +
             unencryptedRds.UnencryptedInstancesCount +
+            rdsNoBackups.InstancesWithoutAdequateBackupsCount +
             imdsv1Instances.Imdsv1InstancesCount +
             lambda.PublicFunctionsCount +
             elb.PublicLoadBalancersCount +
@@ -200,6 +205,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             UnattachedVolumes = unattachedVolumes.UnattachedVolumesCount,
             RdsInstancesWithOpenPorts = rdsOpenPorts.InstancesWithPublicPorts,
             UnencryptedRdsInstances = unencryptedRds.UnencryptedInstancesCount,
+            RdsInstancesWithoutAdequateBackups = rdsNoBackups.InstancesWithoutAdequateBackupsCount,
             Imdsv1Instances = imdsv1Instances.Imdsv1InstancesCount,
             PublicLambdaFunctions = lambda.PublicFunctionsCount,
             PublicLoadBalancers = elb.PublicLoadBalancersCount,

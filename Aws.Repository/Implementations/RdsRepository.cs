@@ -18,6 +18,7 @@ public class RdsRepository : IRdsRepository
     private readonly IAmazonEC2 _ec2Client;
     private readonly ILogger<RdsRepository> _logger;
     private readonly HashSet<string> _publicInboundCidrs;
+    private readonly int _minBackupRetentionDays;
 
     public RdsRepository(
         IAmazonRDS rdsClient,
@@ -30,6 +31,7 @@ public class RdsRepository : IRdsRepository
         _logger = logger;
         _publicInboundCidrs = rdsOptions.Value.PublicInboundCidrs
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _minBackupRetentionDays = rdsOptions.Value.MinBackupRetentionDays;
     }
 
     public async Task<RdsOpenPortsResponseDto> GetInstancesWithOpenPortsByRegionAsync(
@@ -102,6 +104,74 @@ public class RdsRepository : IRdsRepository
             ScannedAt = DateTime.UtcNow
         };
     }
+
+    public async Task<RdsNoBackupsResponseDto> GetInstancesWithoutAdequateBackupsByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedRegion = NormalizeRegion(region);
+        IAmazonRDS rdsClient = GetRegionalRdsClient(normalizedRegion);
+
+        List<DBInstance> instances = await ListDbInstancesAsync(rdsClient, cancellationToken);
+        List<RdsNoBackupInstanceDto> instancesAtRisk = instances
+            .Where(instance => !IsReadReplica(instance))
+            .Select(instance => MapNoBackupInstance(instance, _minBackupRetentionDays))
+            .Where(instance => instance is not null)
+            .Cast<RdsNoBackupInstanceDto>()
+            .OrderBy(instance => instance.DbInstanceIdentifier, StringComparer.Ordinal)
+            .ToList();
+
+        int eligibleCount = instances.Count(instance => !IsReadReplica(instance));
+
+        _logger.LogInformation(
+            "Found {AtRiskCount}/{EligibleCount} RDS instances without adequate backups in region {Region}",
+            instancesAtRisk.Count,
+            eligibleCount,
+            normalizedRegion);
+
+        return new RdsNoBackupsResponseDto
+        {
+            Region = normalizedRegion,
+            MinBackupRetentionDays = _minBackupRetentionDays,
+            TotalInstances = eligibleCount,
+            InstancesWithoutAdequateBackupsCount = instancesAtRisk.Count,
+            Instances = instancesAtRisk,
+            ScannedAt = DateTime.UtcNow
+        };
+    }
+
+    private static bool IsReadReplica(DBInstance instance) =>
+        !string.IsNullOrWhiteSpace(instance.ReadReplicaSourceDBInstanceIdentifier);
+
+    private static RdsNoBackupInstanceDto? MapNoBackupInstance(DBInstance instance, int minBackupRetentionDays)
+    {
+        int backupRetentionDays = instance.BackupRetentionPeriod ?? 0;
+
+        if (backupRetentionDays >= minBackupRetentionDays)
+            return null;
+
+        string riskReason = backupRetentionDays == 0
+            ? "Automated backups disabled"
+            : $"Backup retention below {minBackupRetentionDays} days";
+
+        return new RdsNoBackupInstanceDto
+        {
+            DbInstanceIdentifier = instance.DBInstanceIdentifier ?? "unknown",
+            Engine = instance.Engine ?? "unknown",
+            EngineVersion = instance.EngineVersion,
+            Status = instance.DBInstanceStatus,
+            BackupRetentionPeriodDays = backupRetentionDays,
+            PreferredBackupWindow = instance.PreferredBackupWindow,
+            LatestRestorableTime = instance.LatestRestorableTime,
+            RiskReason = riskReason,
+            Recommendation = BuildNoBackupRecommendation(backupRetentionDays, minBackupRetentionDays)
+        };
+    }
+
+    private static string BuildNoBackupRecommendation(int backupRetentionDays, int minBackupRetentionDays) =>
+        backupRetentionDays == 0
+            ? "Enable automated backups with a retention period that meets your recovery objectives."
+            : $"Increase backup retention to at least {minBackupRetentionDays} days to improve point-in-time recovery coverage.";
 
     private static RdsUnencryptedInstanceDto MapUnencryptedInstance(DBInstance instance) =>
         new()

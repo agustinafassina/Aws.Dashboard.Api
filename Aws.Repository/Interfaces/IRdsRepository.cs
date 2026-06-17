@@ -11,4 +11,8 @@ public interface IRdsRepository
     Task<RdsUnencryptedInstancesResponseDto> GetUnencryptedInstancesByRegionAsync(
         string region,
         CancellationToken cancellationToken = default);
+
+    Task<RdsNoBackupsResponseDto> GetInstancesWithoutAdequateBackupsByRegionAsync(
+        string region,
+        CancellationToken cancellationToken = default);
 }
