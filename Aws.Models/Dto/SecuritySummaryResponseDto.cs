@@ -25,6 +25,7 @@ public class SecuritySummaryResponseDto
     public int AccessKeysNeverUsed { get; init; }
     public int UsersWithoutMfa { get; init; }
     public int RiskyPolicies { get; init; }
+    public int OverprivilegedPolicies { get; init; }
     public int AdminPrivilegeGrants { get; init; }
     public int CrossAccountRoles { get; init; }
     public int RootAccountRiskCount { get; init; }

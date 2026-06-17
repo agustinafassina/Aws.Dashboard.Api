@@ -111,6 +111,8 @@ public class SecuritySummaryService : ISecuritySummaryService
             _iamSecurityService.GetUsersWithoutMfaAsync(cancellationToken);
         Task<IamRiskyPoliciesResponseDto> riskyPoliciesTask =
             _iamSecurityService.GetRiskyPoliciesAsync(cancellationToken);
+        Task<IamOverprivilegedPoliciesResponseDto> overprivilegedPoliciesTask =
+            _iamSecurityService.GetOverprivilegedCustomPoliciesAsync(cancellationToken);
         Task<IamAdminPrivilegeGrantsResponseDto> adminGrantsTask =
             _iamSecurityService.GetAdminPrivilegeGrantsAsync(cancellationToken);
         Task<IamCrossAccountRolesResponseDto> crossAccountRolesTask =
@@ -139,6 +141,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             accessKeysTask,
             usersWithoutMfaTask,
             riskyPoliciesTask,
+            overprivilegedPoliciesTask,
             adminGrantsTask,
             crossAccountRolesTask,
             rootAccountTask,
@@ -162,6 +165,7 @@ public class SecuritySummaryService : ISecuritySummaryService
         IamAccessKeysResponseDto accessKeys = await accessKeysTask;
         IamUsersWithoutMfaResponseDto usersWithoutMfa = await usersWithoutMfaTask;
         IamRiskyPoliciesResponseDto riskyPolicies = await riskyPoliciesTask;
+        IamOverprivilegedPoliciesResponseDto overprivilegedPolicies = await overprivilegedPoliciesTask;
         IamAdminPrivilegeGrantsResponseDto adminGrants = await adminGrantsTask;
         IamCrossAccountRolesResponseDto crossAccountRoles = await crossAccountRolesTask;
         IamRootAccountStatusResponseDto rootAccount = await rootAccountTask;
@@ -188,6 +192,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             accessKeys.AccessKeysNeverUsed +
             usersWithoutMfa.UsersWithoutMfa +
             riskyPolicies.RiskyPolicyCount +
+            overprivilegedPolicies.OverprivilegedPolicyCount +
             adminGrants.AdminPrivilegeGrantCount +
             crossAccountRoles.CrossAccountRolesCount +
             rootAccount.RiskReasons.Count +
@@ -218,6 +223,7 @@ public class SecuritySummaryService : ISecuritySummaryService
             AccessKeysNeverUsed = accessKeys.AccessKeysNeverUsed,
             UsersWithoutMfa = usersWithoutMfa.UsersWithoutMfa,
             RiskyPolicies = riskyPolicies.RiskyPolicyCount,
+            OverprivilegedPolicies = overprivilegedPolicies.OverprivilegedPolicyCount,
             AdminPrivilegeGrants = adminGrants.AdminPrivilegeGrantCount,
             CrossAccountRoles = crossAccountRoles.CrossAccountRolesCount,
             RootAccountRiskCount = rootAccount.RiskReasons.Count,
