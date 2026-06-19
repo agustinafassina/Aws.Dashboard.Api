@@ -59,7 +59,6 @@ docker run -d -p 8787:80 \
 Swagger: `http://localhost:8787/swagger`
 
 ## Configuration ⚙️
-
 ### AWS credentials 🔑
 Uses the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-net/v3/developer-guide/creds-locate.html): env vars, `~/.aws/credentials`, or IAM role.
 
