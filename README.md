@@ -23,9 +23,9 @@ Help teams audit and improve their AWS posture by exposing misconfigurations, ri
 | **Cost** | Costs grouped by project tag |
 
 ## Requirements ✅
-- .NET 10 SDK
-- AWS credentials with read permissions for the resources being scanned
-- (Optional) Docker
+- .NET 10 SDK.
+- AWS credentials with read permissions for the resources being scanned.
+- (Optional) Docker.
 
 ## Solution structure 📦
 | Project | Responsibility |
