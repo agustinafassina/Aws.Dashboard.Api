@@ -147,7 +147,4 @@ Regional endpoints require `?region=` (e.g. `us-east-1`). IAM and Cost Explorer 
 ## Contributing 🤝
 1. Fork the repository
 2. Create a branch (`feature/your-feature`)
-3. Open a Pull Request describing your changes
-
-## License 📜
-Created by Agustina Fassina.
+3. Open a Pull Request describing your changes.
