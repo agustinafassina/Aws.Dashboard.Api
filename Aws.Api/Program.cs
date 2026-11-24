@@ -1,17 +1,43 @@
-using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Aws.Api.Middleware;
-using Aws.Api.Validators;
 using Aws.Models.Configuration;
 using Aws.Repository;
 using Aws.Services;
 
+const string AuthScheme = "Auth0App1";
+
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
+// When true (default), every endpoint requires a valid JWT unless marked [AllowAnonymous].
+var requireAuthentication = configuration.GetValue("Auth:RequireAuthentication", true);
+
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Description = "Paste the JWT access token (without the 'Bearer ' prefix)."
+    });
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // AWS SDK (uses default credential chain: env vars, profile, IAM role)
 builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
@@ -43,9 +69,6 @@ builder.Services.Configure<InspectorOptions>(configuration.GetSection(InspectorO
 // Dependency Injection: Repositories (then Services)
 builder.Services.AddRepositories();
 builder.Services.AddApplicationServices();
-
-// Request validators (FluentValidation)
-builder.Services.AddValidatorsFromAssemblyContaining<ItemCreateDtoValidator>();
 
 // CORS — explicit origins only (* is ignored; incompatible with credentialed browser requests)
 var configuredOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
@@ -80,9 +103,9 @@ builder.Services.AddCors(options =>
 // Authentication
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultScheme = AuthScheme;
 })
-.AddJwtBearer("Auth0App1", options =>
+.AddJwtBearer(AuthScheme, options =>
 {
     options.Audience = configuration["Auth0App1:Audience"] ?? Environment.GetEnvironmentVariable("Auth0App1.Audience");
     options.Authority = configuration["Auth0App1:Issuer"] ?? Environment.GetEnvironmentVariable("Auth0App1.Issuer");
@@ -115,6 +138,20 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+// Authorization — secure by default: all endpoints require an authenticated user.
+builder.Services.AddAuthorization(options =>
+{
+    if (requireAuthentication)
+    {
+        options.FallbackPolicy = new AuthorizationPolicyBuilder(AuthScheme)
+            .RequireAuthenticatedUser()
+            .Build();
+    }
+});
+
+if (!requireAuthentication && !builder.Environment.IsDevelopment())
+    throw new InvalidOperationException("Auth:RequireAuthentication=false is only allowed in the Development environment.");
+
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
 
@@ -136,6 +173,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health").AllowAnonymous();
+
+if (!requireAuthentication)
+    app.Logger.LogWarning("Authentication is DISABLED (Auth:RequireAuthentication=false). Do not use this setting outside local development.");
 
 app.Run();
