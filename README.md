@@ -42,23 +42,39 @@ dotnet run --project Aws.Api
 ```
 
 - Swagger: `http://localhost:5142/swagger`
-- Health check: `GET /health`
+- Health check: `GET /health` (public)
+- In `Development`, authentication is disabled — see [Authentication](#authentication-)
 - Example requests: `AwsApi.http`
 
 ## Docker 🐳
 ```bash
 docker build -f Dockerfile -t aws-api:latest .
 docker run -d -p 8787:80 \
-  -e ASPNETCORE_ENVIRONMENT=Development \
+  -e ASPNETCORE_ENVIRONMENT=Production \
+  -e Auth0App1__Issuer=https://your-tenant.auth0.com/ \
+  -e Auth0App1__Audience=your-api-audience \
   -e AWS_ACCESS_KEY_ID=your-key \
   -e AWS_SECRET_ACCESS_KEY=your-secret \
   -e AWS__Region=us-east-1 \
   --name aws-api aws-api:latest
 ```
 
-Swagger: `http://localhost:8787/swagger`
+Swagger is only enabled in `Development`. To use it from the container, run with `ASPNETCORE_ENVIRONMENT=Development` (authentication is then disabled — local use only) and open `http://localhost:8787/swagger`.
 
 ## Configuration ⚙️
+### Authentication 🔐
+The API is **secure by default**: every endpoint requires a valid JWT (Auth0) sent as `Authorization: Bearer <token>`. Only `GET /health` is public.
+
+| Setting | Purpose | Env var |
+|---------|---------|---------|
+| `Auth0App1:Issuer` | Auth0 tenant URL (e.g. `https://your-tenant.auth0.com/`) | `Auth0App1__Issuer` |
+| `Auth0App1:Audience` | API identifier configured in Auth0 | `Auth0App1__Audience` |
+| `Auth:RequireAuthentication` | Require a JWT on all endpoints (default `true`) | `Auth__RequireAuthentication` |
+
+`Auth:RequireAuthentication` is set to `false` in `appsettings.Development.json` so you can run the API locally without Auth0. Setting it to `false` in any other environment makes the API fail on startup.
+
+In Swagger, click **Authorize** and paste only the access token (Swagger adds the `Bearer` prefix).
+
 ### AWS credentials 🔑
 Uses the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-net/v3/developer-guide/creds-locate.html): env vars, `~/.aws/credentials`, or IAM role.
 
@@ -88,7 +104,7 @@ Example for a frontend on another port:
 ```
 
 ## API endpoints 🛡️
-Regional endpoints require `?region=` (e.g. `us-east-1`). IAM and Cost Explorer are global. Full schemas are in **Swagger**.
+All endpoints require `Authorization: Bearer <token>`. Regional endpoints require `?region=` (e.g. `us-east-1`). IAM and Cost Explorer are global. Full schemas are in **Swagger**.
 
 ### Security summary
 | Method | Endpoint | Description |
